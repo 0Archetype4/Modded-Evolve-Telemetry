@@ -256,32 +256,32 @@ window.CATALOG = {
     }
    ]
   },
-  "MaggieSavage": {
+  "MaggieWasteland": {
    "name": "Wasteland Maggie",
    "class": "Trapper",
    "thumb": "https://assets.modded-evolve.com/images/thumbnails/thumb_maggiewasteland.png",
    "voice": "maggie",
    "items": [
     {
-     "key": "MaggieSavageBurstPistol",
+     "key": "MaggieWastelandBurstPistol",
      "name": "Burst Pistol",
      "type": "Primary",
      "icon": "https://assets.modded-evolve.com/images/icons/maggiesmgprimary.png"
     },
     {
-     "key": "MaggieSavageFlameSnare",
+     "key": "MaggieWastelandFlameSnare",
      "name": "Flame Snare",
      "type": "Secondary",
      "icon": "https://assets.modded-evolve.com/images/icons/wastelandmaggieharpoon.png"
     },
     {
-     "key": "MaggieSavageCombatTrapjaw",
+     "key": "MaggieWastelandCombatTrapjaw",
      "name": "Combat Trapjaw",
      "type": "Special Ability",
      "icon": "https://assets.modded-evolve.com/images/icons/wastelandmaggiepettrapjaw.png"
     },
     {
-     "key": "MaggieSavagePlanetScanner",
+     "key": "MaggieWastelandPlanetScanner",
      "name": "Planet Scanner",
      "type": "Class Ability",
      "icon": "https://assets.modded-evolve.com/images/icons/trapperplanetscanner.jpg"
