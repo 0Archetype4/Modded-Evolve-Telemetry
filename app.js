@@ -300,7 +300,7 @@ function heat(mapKey, domes, view = 'all', numbered = false) {
     .map(d => ({ ...d, wt: view === 'dmg' ? d.dmg : view === 'downs' ? d.downs : 1 }));
   const mx = Math.max(1, ...pts.map(p => p.wt));
   return `<div class="heat">${img(info.minimap, '', info.name)}<svg viewBox="0 0 100 100" role="img" aria-label="Dome positions on ${esc(info.name)}">${pts.map((p, i) => {
-    const x = ((p.x - b[0]) / (b[2] - b[0]) * 100).toFixed(1), y = ((p.y - b[1]) / (b[3] - b[1]) * 100).toFixed(1);
+    const x = ((p.x - b[0]) / (b[2] - b[0]) * 100).toFixed(1), y = (100 - (p.y - b[1]) / (b[3] - b[1]) * 100).toFixed(1);       // the minimap is north up: world y grows upward
     return numbered ? `<circle cx="${x}" cy="${y}" r="3.2" fill="${p.caught ? '#c0392b' : '#777'}" stroke="#fff" stroke-width=".4"/><text x="${x}" y="${(+y + 1.2).toFixed(1)}" font-size="3.4" text-anchor="middle" fill="#fff">${i + 1}</text>`
       : `<circle cx="${x}" cy="${y}" r="${(1.4 + 2.4 * p.wt / mx).toFixed(1)}" fill="#ff3b1f" opacity=".3"/>`; }).join('')}</svg></div>`;
 }
@@ -450,7 +450,7 @@ function maps() {
     <div class="panel">${kv('Domes thrown', num(mp.throws))}${kv('Caught the Monster', `${num(mp.caught)} · ${fpct(pct(mp.caught, mp.throws))}`)}${kv('Monster damage in domes', num(mp.domes.reduce((a, d) => a + d.dmg, 0)))}
       ${kv('Hunters downed in domes', num(mp.domes.reduce((a, d) => a + d.downs, 0)))}
       ${HUNTERS.map(r => kv(`${r} inside when it went up`, fpct(pct(mp.inside[r], mp.domes.length)))).join('')}</div>
-    <p class="note">Dot positions use stand-in map bounds until the game's world coordinates are lined up with the minimap.</p></div></div>
+    <p class="note">Dots are placed with each map's own minimap bounds from the game files.</p></div></div>
   <h2>Map numbers</h2>
   ${tiles(tile('Matches', num(mp.n)), tile('Hunters win', fpct(pct(mp.w, mp.d))), tile('Average match', clock(avg(mp.dur, mp.n))), tile('First fight', clock(avg(mp.first, mp.n))),
     tile('Ended inside a dome', fpct(pct(mp.endDome, mp.n))), tile('Wildlife damage', num(avg(mp.wlMon, mp.n)), 'to the Monster, per match'), tile('Wildlife damage', num(avg(mp.wlHun, mp.n)), 'to Hunters, per match'))}
@@ -734,7 +734,7 @@ function about() {
     <li>Records carry no clock time. Dates, queue hours and dome times come from when each record arrived.</li>
     <li>The game never fills in the Monster's distance travelled: the value seen across all ${num(MATCHES.length)} match records is ${esc(dist)}.</li>
     <li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>
-    <li>Ranked division boundaries are provisional, and heatmap positions use stand-in map bounds.</li>
+    <li>Ranked division boundaries are provisional.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li></ul></div>
   <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'))}`;
