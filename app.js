@@ -736,7 +736,8 @@ function about() {
     <li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>
     <li>Ranked division boundaries are provisional.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
-    <li>Matches played by bots are left out of character, perk and matchup numbers.</li></ul></div>
+    <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
+    <li>The Test Client records the game's match statistics for every match played on it and shows them here with the player's display name. This applies to everyone using the Test Client; there is no opt-out.</li></ul></div>
   <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'))}`;
 }
 
