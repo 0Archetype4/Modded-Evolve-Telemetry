@@ -659,10 +659,10 @@ function progression() {
 function store() {
   const p = REC.purchase, ok = p.filter(e => e.Data.Result === 'Success'), items = {};
   for (const e of p) { const it = cell(items, e.Data.OfferID, () => ({ ...e.Data, n: 0, ok: 0, paid: 0 })); it.n++; if (e.Data.Result === 'Success') { it.ok++; it.paid += e.Data.SalePrice; } }
-  const by = (id, label, key) => table(id, [Tx(label, x => pretty(x.k)), N('Attempts', x => x.n), N('Completed', x => x.ok), P('Share', x => pct(x.n, p.length))],
+  const by = (id, label, key) => table(id, [Tx(label, x => pretty(x.k) || 'Not recorded'), N('Attempts', x => x.n), N('Completed', x => x.ok), P('Share', x => pct(x.n, p.length))],
     Object.values(p.reduce((o, e) => { const x = cell(o, key(e), () => ({ k: key(e), n: 0, ok: 0 })); x.n++; x.ok += e.Data.Result === 'Success' ? 1 : 0; return o; }, {})), 1);
   return `<h1>Store</h1><p class="sub">What gets bought in the in-game Store. Totals only; nobody's purchases are shown by name.</p>
-  ${tiles(tile('Purchase attempts', num(p.length)), tile('Completed', num(ok.length), fpct(pct(ok.length, p.length))), tile('Failed', num(p.length - ok.length)), tile('Keys spent', num(ok.reduce((a, e) => a + e.Data.SalePrice, 0))))}
+  ${tiles(tile('Purchase attempts', num(p.length)), tile('Completed', num(ok.length), fpct(pct(ok.length, p.length))), tile('Not completed', num(p.length - ok.length), 'cancelled or failed'), tile('Keys spent', num(ok.reduce((a, e) => a + e.Data.SalePrice, 0))))}
   <h2>Most bought</h2>${table('store', [Tx('Item', i => i.Name), Tx('Kind', i => i.OfferType), Tx('Offer', i => i.OfferID), N('List price', i => i.ListPrice), N('Average paid', i => i.ok ? i.paid / i.ok : null),
     N('Attempts', i => i.n), N('Bought', i => i.ok)], Object.values(items), 6)}
   <div class="cols"><section><h2>Where purchases start</h2>${by('st-ctx', 'Screen', e => e.Data.Context)}</section><section><h2>How they are paid</h2>${by('st-pay', 'Method', e => e.Data.Method)}</section></div>
