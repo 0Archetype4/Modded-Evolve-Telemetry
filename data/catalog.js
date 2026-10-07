@@ -1746,10 +1746,10 @@ window.CATALOG = {
    "name": "Lava Rivers",
    "minimap": "https://assets.modded-evolve.com/images/gallery/maps/minimap_stage2_lava_rivers.png",
    "bounds": [
-    0,
-    0,
-    2048,
-    2048
+    179.94336,
+    181.22119,
+    729.94336,
+    731.22119
    ],
    "layers": {}
   },
@@ -1757,10 +1757,10 @@ window.CATALOG = {
    "name": "Forest Cliffs",
    "minimap": "https://assets.modded-evolve.com/images/gallery/maps/minimap_stage2_forest_cliffs.png",
    "bounds": [
-    0,
-    0,
-    2048,
-    2048
+    783.63086,
+    787.8595,
+    1373.6309,
+    1377.8595
    ],
    "layers": {}
   },
@@ -1768,10 +1768,10 @@ window.CATALOG = {
    "name": "Desert Mountains",
    "minimap": "https://assets.modded-evolve.com/images/gallery/maps/minimap_stage2_desert_mountains.png",
    "bounds": [
-    0,
-    0,
-    2048,
-    2048
+    251.86786,
+    231.47159,
+    721.86786,
+    701.47156
    ],
    "layers": {
     "deepest_dark": {
@@ -1784,10 +1784,10 @@ window.CATALOG = {
    "name": "Ice Crashsite",
    "minimap": "https://assets.modded-evolve.com/images/gallery/maps/minimap_stage2_ice_crashsite.png",
    "bounds": [
-    0,
-    0,
-    2048,
-    2048
+    292.57654,
+    71.272247,
+    892.57654,
+    671.27222
    ],
    "layers": {}
   },
@@ -1795,10 +1795,10 @@ window.CATALOG = {
    "name": "Desert Canyon",
    "minimap": "https://assets.modded-evolve.com/images/gallery/maps/minimap_stage2_desert_canyon.png",
    "bounds": [
-    0,
-    0,
-    2048,
-    2048
+    310.71539,
+    162.51636,
+    910.71539,
+    762.51636
    ],
    "layers": {}
   }
