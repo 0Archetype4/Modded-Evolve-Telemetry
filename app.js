@@ -6,7 +6,9 @@ const C = window.CATALOG, NAMES = window.TELEMETRY_PLAYERS || {};
 const EVENTS = (window.TELEMETRY_EVENTS || []).filter(e => e.BaseHeader?.Context !== 'aisoak');
 const ROLES = ['Assault', 'Trapper', 'Medic', 'Support', 'Monster'], HUNTERS = ROLES.slice(0, 4);
 const app = document.getElementById('app');
-document.getElementById('sample').hidden = !window.TELEMETRY_SAMPLE;
+const banner = document.getElementById('sample');
+if (window.TELEMETRY_FEED_ERROR) banner.textContent = 'The match data could not be loaded right now. Refresh in a minute.';     // never show an empty site as if it were the truth
+banner.hidden = !window.TELEMETRY_SAMPLE && !window.TELEMETRY_FEED_ERROR;
 
 /* ---------- small helpers ---------- */
 // every string that comes out of a record or a player name goes through esc(): records are sent by players' own PCs
