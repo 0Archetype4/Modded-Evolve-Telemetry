@@ -26,6 +26,9 @@ const sumv = o => Object.values(o || {}).reduce((a, b) => a + (+b || 0), 0);
 const cell = (o, k, init) => o[k] || (o[k] = init());
 const nw = () => ({ n: 0, w: 0, d: 0 });
 const T = e => e._t ?? (e._t = Date.parse(e._received));
+// The dates the loaded records span. Shown beside every total, because the server only sends a recent window: without this a shorter window would shrink the numbers unseen.
+const SPAN = () => SPAN.v || (SPAN.v = EVENTS.reduce((a, e) => [Math.min(a[0], T(e)), Math.max(a[1], T(e))], [Infinity, 0]));
+const covers = () => EVENTS.length ? `records from ${day(SPAN()[0])} to ${day(SPAN()[1])}` : 'no records yet';
 // which play session a record belongs to: the launcher blanks the sign-on session id and leaves a short hash of it in _session
 const sessionOf = e => e._session || e.ClientHeader?.SSOSessionID || '';
 const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
@@ -143,7 +146,7 @@ const select = (path, opts, cur, all) => `<select data-st="${path}">${all ? `<op
   return `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`;
 const filterBar = () => `<div class="filters"><label>Patch ${select('fl.v', uniq(m => m.v), ST.fl.v, 'All patches')}</label>
   <label>Mode ${select('fl.mode', uniq(m => m.hdr.GameMode).map(g => [g, modeName(g)]), ST.fl.mode, 'All modes')}</label><label>Match type ${select('fl.type', uniq(m => m.hdr.MatchType).sort((a, b) => Object.keys(TYPES).indexOf(a) - Object.keys(TYPES).indexOf(b)).map(t => [t, typeName(t)]), ST.fl.type, 'All types')}</label>
-  <label>Solo matches ${select('fl.solo', [['', 'Left out'], ['1', 'Included']], ST.fl.solo)}</label><span class="dim">${num(S.matches.length)} matches</span></div>`;
+  <label>Solo matches ${select('fl.solo', [['', 'Left out'], ['1', 'Included']], ST.fl.solo)}</label><span class="dim">${num(S.matches.length)} matches · ${covers()}</span></div>`;
 const tabs = (path, opts, cur) => `<div class="tabs">${opts.map(o => { const [v, l, off] = Array.isArray(o) ? o : [o, o];
   return `<button data-st="${path}" data-v="${esc(v)}" class="${v === cur ? 'on' : ''}"${off ? ' disabled' : ''}>${l}</button>`; }).join('')}</div>`;
 
@@ -741,7 +744,7 @@ function about() {
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
     <li>The Test Client records the game's match statistics for every match played on it and shows them here with the player's display name. This applies to everyone using the Test Client; there is no opt-out.</li></ul></div>
-  <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'))}`;
+  <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'), tile('Covers', EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', 'the server sends a recent window'))}`;
 }
 
 /* ---------- router ---------- */
