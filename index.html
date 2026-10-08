@@ -219,7 +219,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
   function get() { return fetch(FEED, { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }); }
   get().then(function (d) { window.TELEMETRY_PLAYERS = d.players || {}; window.TELEMETRY_EVENTS = d.events || []; seen = mark(d); })
     .catch(function () { window.TELEMETRY_EVENTS = []; window.TELEMETRY_FEED_ERROR = true; })
-    .finally(function () { var s = document.createElement('script'); s.src = "app.js?v=84ee621894b3"; document.body.appendChild(s); });
+    .finally(function () { var s = document.createElement('script'); s.src = "app.js?v=d478e1ab53eb"; document.body.appendChild(s); });
   setInterval(function () {
     if (document.hidden || !seen || document.getElementById('fresh')) return;
     get().then(function (d) {
