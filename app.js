@@ -33,9 +33,10 @@ const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
 const ver = e => { const c = e.BaseHeader?.Context; return c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e); };
 const pretty = s => String(s ?? '').replace(/^(ONLINE_REGION_|CLASSIFICATION_REGION_|ROUND_END_REASON_|eLSR?_)/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
   .toLowerCase().replace(/^./, c => c.toUpperCase());
-// the names the site uses for the game's match types and modes (owner's wording: Ranked, Arcade, Custom)
+// the names the site uses for the game's match types and modes (owner's wording: Ranked, Arcade, Custom).
+// "Campaign" is what the game calls the tutorial missions: every Campaign match recorded so far has GameMode "Tutorial" on the map "tutorial".
 const TYPES = { RankedQuickPlay: 'Ranked', QuickPlay: 'Arcade', Custom: 'Custom', RankedQuickPlayCoop: 'Ranked co-op', QuickPlayCoop: 'Arcade co-op', CustomCoop: 'Custom co-op',
-  Ranked: 'Ranked', Hunt: 'Arcade' }, MODES = { ArenaMode: 'Arena', NewPlayerScenario: 'New player scenario' };
+  Ranked: 'Ranked', Hunt: 'Arcade', Campaign: 'Tutorial' }, MODES = { ArenaMode: 'Arena', NewPlayerScenario: 'New player scenario' };
 const typeName = t => TYPES[t] || pretty(t), modeName = g => MODES[g] || pretty(g);
 const bar = v => v == null ? '–' : `<span class="bar"><i style="width:${Math.max(0, Math.min(100, v)).toFixed(1)}%"></i></span>${fpct(v)}`;
 
