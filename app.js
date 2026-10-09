@@ -6,7 +6,9 @@ const C = window.CATALOG, NAMES = window.TELEMETRY_PLAYERS || {};
 // (BaseHeader.Context, set by the launcher only when the player's game files are exactly that release). Everything else is left out:
 // older public builds, betas and drafts, files that match no release, and Turtle Rock's own test tag ("aisoak").
 // Add each official release's exact name here when it goes live. The About page says which are counted and how many records were left out.
-const OFFICIAL = new Set([]);
+const OFFICIAL = new Set([
+  'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
+]);
 // the invented sample, and the private local preview, show everything they are given
 const SHOW_ALL = !!window.TELEMETRY_SAMPLE || ['localhost', '127.0.0.1'].includes(location.hostname) && !/[?&]official=1/.test(location.search);
 const RAW = window.TELEMETRY_EVENTS || [];
