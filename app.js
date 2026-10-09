@@ -2,8 +2,16 @@
 /* Modded Evolve Telemetry: joins the game's raw telemetry records into matches and draws every page.
    COVERAGE.md lists where each recorded field ends up. Site text says "match"; the game's own field names say "Round". */
 const C = window.CATALOG, NAMES = window.TELEMETRY_PLAYERS || {};
-// records tagged by Turtle Rock's automated tests are not real play
-const EVENTS = (window.TELEMETRY_EVENTS || []).filter(e => e.BaseHeader?.Context !== 'aisoak');
+// Owner's rule (2026-10-09): only matches played on an OFFICIAL public release count. Each record names the release it was played on
+// (BaseHeader.Context, set by the launcher only when the player's game files are exactly that release). Everything else is left out:
+// older public builds, betas and drafts, files that match no release, and Turtle Rock's own test tag ("aisoak").
+// Add each official release's exact name here when it goes live. The About page says which are counted and how many records were left out.
+const OFFICIAL = new Set([]);
+// the invented sample, and the private local preview, show everything they are given
+const SHOW_ALL = !!window.TELEMETRY_SAMPLE || ['localhost', '127.0.0.1'].includes(location.hostname) && !/[?&]official=1/.test(location.search);
+const RAW = window.TELEMETRY_EVENTS || [];
+const EVENTS = RAW.filter(e => e.BaseHeader?.Context !== 'aisoak' && (SHOW_ALL || OFFICIAL.has(e.BaseHeader?.Context)));
+const LEFT_OUT = RAW.length - EVENTS.length;
 const ROLES = ['Assault', 'Trapper', 'Medic', 'Support', 'Monster'], HUNTERS = ROLES.slice(0, 4);
 const app = document.getElementById('app');
 const banner = document.getElementById('sample');
@@ -744,6 +752,7 @@ function about() {
     <li>Ranked division boundaries are provisional.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
+    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(esc).join(', ') : ''}. Records from any other build are left out${SHOW_ALL ? ' (this local preview shows everything)' : `; ${num(LEFT_OUT)} left out of what is loaded now`}.</li>
     <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
   <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'), tile('Covers', EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', 'the server sends a recent window'))}`;
 }
