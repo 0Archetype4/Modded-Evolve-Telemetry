@@ -345,6 +345,8 @@ function characters() {
     N('Matches', c => c.n), P('Pick rate', c => pickRate(c.n, c.role)), N('Win rate', c => pct(c.w, c.d), c => `<span class="c-${c.role}">${bar(pct(c.w, c.d))}</span>`),
     N('Damage dealt', c => avg(c.dmg, c.n)), N('Damage taken', c => avg(c.taken, c.n)), N('Healing done', c => avg(c.heal, c.n) || null),
     N('Avg level', c => avg(c.lvl, c.lvlN), c => dec(avg(c.lvl, c.lvlN)))], rows, 2, 0, false, c => charHref(c.id))}</div>
+  <p class="note">${(ST.chars.cls === 'All' ? ROLES : [ST.chars.cls]).map(r => `${r}: a person played it in ${num(people(r))} of the ${num(S.matches.length)} matches${S.bots[r] ? ` (a bot in the other ${num(S.bots[r])})` : ''}`).join(' · ')}.
+    Each class's pick rates are out of its own number and add up to 100%.</p>
   <p class="note">Damage and healing are averages per match, against the other team only.</p>`;
 }
 
