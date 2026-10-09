@@ -8,7 +8,8 @@ const ROLES = ['Assault', 'Trapper', 'Medic', 'Support', 'Monster'], HUNTERS = R
 const app = document.getElementById('app');
 const banner = document.getElementById('sample');
 if (window.TELEMETRY_FEED_ERROR) banner.textContent = 'The match data could not be loaded right now. Refresh in a minute.';     // never show an empty site as if it were the truth
-banner.hidden = !window.TELEMETRY_SAMPLE && !window.TELEMETRY_FEED_ERROR;
+else if (!EVENTS.length) banner.textContent = 'No matches have been recorded yet. This site fills in as matches are played.';
+banner.hidden = !window.TELEMETRY_SAMPLE && !window.TELEMETRY_FEED_ERROR && EVENTS.length > 0;
 
 /* ---------- small helpers ---------- */
 // every string that comes out of a record or a player name goes through esc(): records are sent by players' own PCs
@@ -743,7 +744,7 @@ function about() {
     <li>Ranked division boundaries are provisional.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
-    <li>The Test Client records the game's match statistics for every match played on it and shows them here with the player's display name. This applies to everyone using the Test Client; there is no opt-out.</li></ul></div>
+    <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
   <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'), tile('Covers', EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', 'the server sends a recent window'))}`;
 }
 
