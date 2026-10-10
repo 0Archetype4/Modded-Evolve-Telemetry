@@ -20,9 +20,8 @@ const app = document.getElementById('app');
 const banner = document.getElementById('sample');
 const HAS_TOTALS = !!(window.TELEMETRY_SUMMARY && window.SUMMARY);       // stored all-time totals are loaded
 // never show an empty site as if it were the truth
-if (window.TELEMETRY_FEED_ERROR) banner.textContent = HAS_TOTALS ? 'Recent matches could not be loaded right now. The all-time totals are still shown.' : 'The match data could not be loaded right now. Refresh in a minute.';
-else if (!EVENTS.length && !HAS_TOTALS) banner.textContent = 'No matches have been recorded yet. This site fills in as matches are played.';
-banner.hidden = !window.TELEMETRY_SAMPLE && !window.TELEMETRY_FEED_ERROR && (EVENTS.length > 0 || HAS_TOTALS);
+if (!EVENTS.length && !HAS_TOTALS) banner.textContent = 'The statistics could not be loaded right now. Refresh in a minute.';
+banner.hidden = !window.TELEMETRY_SAMPLE && (EVENTS.length > 0 || HAS_TOTALS);
 
 /* ---------- small helpers ---------- */
 // every string that comes out of a record or a player name goes through esc(): records are sent by players' own PCs
@@ -98,9 +97,8 @@ function chart(vals, labels, fmt = num, cls = '') {
 }
 
 /* ---------- sort the records ---------- */
-const byId = new Map(), REC = { login: [], mm: [], xp: [], reward: [], chall: [], purchase: [], kick: [], profiling: [] }, COUNTS = {}, PX = {};
+const byId = new Map();
 const slot = id => byId.get(id) || byId.set(id, { id, players: {}, clients: {}, domes: [], kicks: [], mm: [] }).get(id);
-const px = id => cell(PX, id, () => ({ id, first: Infinity, last: 0, founder: null, region: '', cregion: '', lang: '', audio: '', isNew: false, logins: 0, mm: [], xp: [], rewards: [], chall: [] }));
 // The records name weapons by the game's own class names ("FlameThrowerB"); the catalog knows a character's kit by slot. So each name is
 // matched to the catalog by the slot it arrives in. Slot order as the first real match showed it: Hunters 1 primary, 2 class ability,
 // 3 secondary, 4 special; Monsters 1 to 4 in card order. ponytail: one name is assumed to mean one item for every character that carries it.
@@ -112,24 +110,9 @@ function learnItems(e) {
   const pn = e.Data.Pistol?.Name;
   if (pn && !ITEMS[pn]) ITEMS[pn] = { ...ITEMS.Pistol, game: pn };
 }
-const KIND = { ClientLoginRecord: 'login', ClientMatchmakingRecord: 'mm', ClientXPRecord: 'xp', ClientRewardRecord: 'reward', ClientChallengeUpdateRecord: 'chall',
-  ClientPurchaseRecord: 'purchase', ClientProfilingRecord: 'profiling', ServerEACClientKickRecord: 'kick' };
-// Put one record where the pages look for it. counted = false for a match fetched on demand (an older match opened by its id):
-// it must not change the "records loaded" counts or the recent-records pages.
-function ingest(e, counted = true) {
-  if (counted) { const c = cell(COUNTS, e.EventName, () => ({ n: 0, last: 0, versions: new Set() }));
-    c.n++; c.last = Math.max(c.last, T(e)); c.versions.add(e.Data?.Version);
-    if (KIND[e.EventName]) REC[KIND[e.EventName]].push(e); }
-  const ch = e.ClientHeader;
-  if (ch) {       // records arrive oldest first, so the last one seen wins
-    if (!counted) { if (e.EventName === 'ClientRoundRecord') slot(String(e.Data.RoundID)).clients[e.Data.CharacterClass] = e; return; }
-    const p = px(ch.My2kID);
-    p.first = Math.min(p.first, T(e)); p.last = Math.max(p.last, T(e));
-    p.region = ch.OnlineRegion; p.cregion = ch.ClassificationRegion; p.lang = ch.Language; p.audio = ch.LanguageAudio; p.isNew = p.isNew || ch.FirstTimeUser;
-    if (e.EventName === 'ClientLoginRecord') { p.logins++; p.founder = e.Data.Founder; }
-    if (e.EventName === 'ClientPurchaseRecord') p.founder = p.founder ?? e.Data.Founder;
-    if (KIND[e.EventName] && p[KIND[e.EventName]]) p[KIND[e.EventName]].push(e);
-    for (const r of e.Data.Rewards || []) p.rewards.push({ t: T(e), why: e.Data.Source || (e.EventName === 'ClientXPRecord' ? 'Level up' : 'Challenge'), ...r });
+// Put one record where its match looks for it. (Everything that is not part of a match is counted by account() further down.)
+function ingest(e) {
+  if (e.ClientHeader) {       // records arrive oldest first, so the last one seen wins
     if (e.EventName === 'ClientRoundRecord') slot(String(e.Data.RoundID)).clients[e.Data.CharacterClass] = e;
     if (e.EventName === 'ClientMatchmakingRecord' && +e.Data.GameSessionId) slot(String(e.Data.GameSessionId)).mm.push(e);
     return;
@@ -161,10 +144,11 @@ const isRanked = m => String(m.hdr.MatchType).startsWith('Ranked');
    pages are those groups added together (summary.js), and the records this page loaded only supply recent matches for the lists. */
 const SUM = window.TELEMETRY_SUMMARY && window.SUMMARY ? window.TELEMETRY_SUMMARY : null;
 const sliceKeys = SUM ? Object.keys(SUM.slices) : [];
+for (const [k, v] of Object.entries(SUM?.items || {})) ITEMS[k] ||= v;      // weapon and ability names the job learned from the records (learnItems)
 const optionsOf = (i, f) => SUM ? [...new Set(sliceKeys.map(k => k.split('|')[i]))].sort() : uniq(f);
 // solo matches are left out by default, unless they are all there is
 const ST = { fl: { v: '', mode: '', type: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
-  players: { q: '', region: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
+  players: { q: '', region: '', all: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
 const passes = m => (!ST.fl.v || m.v === ST.fl.v) && (!ST.fl.mode || m.hdr.GameMode === ST.fl.mode) && (!ST.fl.type || m.hdr.MatchType === ST.fl.type) && (ST.fl.solo || m.hdr.Multiplayer);
 const uniq = f => [...new Set(MATCHES.map(f))].sort();
 const select = (path, opts, cur, all) => `<select data-st="${path}">${all ? `<option value="">${all}</option>` : ''}${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o];
@@ -180,7 +164,7 @@ const tabs = (path, opts, cur) => `<div class="tabs">${opts.map(o => { const [v,
    when the file gets heavy, do this join in the collector and ship the totals instead. */
 function compute(matches) {
   const S = { matches, total: matches.length, chars: {}, perks: {}, combos: {}, maps: {}, players: {}, ends: {}, party: {}, even: {}, leavers: {}, lines: {}, triggers: {},
-    hw: 0, decided: 0, dur: 0, first: 0, throws: 0, caught: 0, late: 0, leaverMatches: 0, lineCount: 0, lineSecs: 0, bots: {}, side: { hunter: 0, monster: 0 } };
+    hw: 0, decided: 0, dur: 0, first: 0, throws: 0, caught: 0, late: 0, leaverMatches: 0, lineCount: 0, lineSecs: 0, bots: {}, side: { hunter: 0, monster: 0 }, dist: {} };
   const newChar = (id, role) => () => ({ id, role, n: 0, w: 0, d: 0, dmg: 0, taken: 0, heal: 0, healRecv: 0, shield: 0, wlTo: 0, wlFrom: 0, deaths: 0, downs: 0, ships: 0, lvl: 0, lvlN: 0,
     feed: 0, firstStage: {}, finalStage: {}, downT: Array(20).fill(0), st: [0, 1, 2, 3].map(() => ({ n: 0, to: 0, from: 0, wlTo: 0, wlFrom: 0, heal: 0, uses: 0, hits: 0 })),
     perks: {}, combos: {}, vs: {}, items: {}, players: {}, skins: {}, builds: {}, src: {}, pts: [0, 1, 2].map(() => [0, 0, 0, 0]), lvN: [0, 0, 0] });
@@ -189,6 +173,7 @@ function compute(matches) {
     const decided = m.decided ? 1 : 0;       // a match with no recorded winner is nobody's win and nobody's loss: it stays out of every win rate
     if (m.decided) { S.decided++; S.hw += m.hunterWin; }
     S.dur += m.dur; S.first += d.FirstEncounterTime || 0; S.throws += d.Dome?.Throws || 0; S.caught += d.Dome?.Captures || 0;
+    const far = String(mon.TotalDistanceTraveled ?? 'nothing'); S.dist[far] = (S.dist[far] || 0) + 1;       // the Monster's distance travelled, as recorded (About page)
     const mp = cell(S.maps, m.mapKey, () => ({ key: m.mapKey, n: 0, w: 0, d: 0, dur: 0, first: 0, throws: 0, caught: 0, endDome: 0, wlMon: 0, wlHun: 0, ends: {}, domes: [], inside: {} }));
     mp.n++; mp.w += m.hunterWin; mp.d += decided; mp.dur += m.dur; mp.first += d.FirstEncounterTime || 0; mp.throws += d.Dome?.Throws || 0; mp.caught += d.Dome?.Captures || 0;
     mp.wlMon += d.Wildlife?.DamageToMonster || 0; mp.wlHun += d.Wildlife?.DamageToHunters || 0; mp.endDome += m.domes.some(e => e.Data.GameEnding) ? 1 : 0;
@@ -296,8 +281,79 @@ function totals(filtered) {
   for (const l of Object.values(T.lines)) l.vars = new Set(l.vars);
   return T;
 }
-const ALL = totals(false);     // players, ranked and the unfiltered pages
-let S = totals(true);          // the stats pages, following the filter bar
+// (window.TELEMETRY_JOB: tools/summarize.js runs this file to count, and calls compute() and account() itself)
+const ALL = window.TELEMETRY_JOB ? null : totals(false);     // players, ranked and the unfiltered pages
+let S = window.TELEMETRY_JOB ? null : totals(true);          // the stats pages, following the filter bar
+
+/* ---------- account totals ----------
+   Everything the Matchmaking, Progression, Store, Community, Fair play and About pages show that does not come from a finished
+   match: queue attempts, XP, rewards, challenges, purchases, sign-ins, kicks, and what each player's game says about their account.
+   Like compute(), it only counts and sums, so tools/summarize.js works it out a day at a time and adds the days up (summary.js).
+   starts: the start records of matches that never sent an end record. */
+function account(events, starts) {
+  const A = { records: {}, hdr: {}, vers: {}, mm: {}, xp: { n: 0, gain: 0, ups: 0 }, rewards: {}, chall: {}, challN: 0, store: { n: 0, ok: 0, paid: 0, items: {}, by: {} },
+    logins: 0, late: 0, kicks: {}, daily: {}, sessions: new Set(), players: {}, unfin: { n: 0, by: {} } };
+  const bump = (o, k) => { o[k] = (o[k] || 0) + 1; }, at = {};
+  const newest = (id, field, t) => t >= (at[id + field] || 0) && (at[id + field] = t, true);      // is this the player's newest record carrying that field?
+  for (const e of events) {
+    const t = T(e), b = e.BaseHeader || {}, d = e.Data || {}, ch = e.ClientHeader, kind = e.EventName;
+    const rc = cell(A.records, kind, () => ({ n: 0, t: 0, versions: {} })); rc.n++; rc.t = Math.max(rc.t, t); bump(rc.versions, String(d.Version));
+    for (const [k, v] of [['Config', b.Config], ['Platform', b.Platform], ['Changelist', b.Changelist], ['BuildNumber', b.BuildNumber], ['Micropatch', b.Micropatch], ['Context', b.Context],
+      ['PublicAppID', b.PublicAppID], ['base', b.Version], ['player', ch?.Version], ['match', e.ServerRoundHeader?.Version], ['perPlayer', e.ServerPlayerRoundHeader?.Version]])
+      if (v !== undefined) bump(cell(A.hdr, k, () => ({})), String(v));
+    const vs = cell(A.vers, `${ver(e)} · build ${build(e)} · ${b.Platform}`, () => ({ n: 0, t: 0 })); vs.n++; vs.t = Math.max(vs.t, t);
+    if (kind === 'ServerEACClientKickRecord') { const k = cell(A.kicks, d.code + '|' + d.message, () => ({ n: 0, t: 0 })); k.n++; k.t = Math.max(k.t, t); }
+    if (!ch) continue;
+    const id = ch.My2kID, p = cell(A.players, id, () => ({ t: 0, since: t, region: '', cregion: '', lang: '', audio: '', founder: null, bal: null, fresh: 0, q: { n: 0, ok: 0, dur: 0, dodges: 0 } }));
+    // the day the server filed the record under when the job says so (a player's own clock can be wrong), else the record's own date
+    const day = cell(A.daily, window.TELEMETRY_DAY || (isNaN(t) ? 'unknown' : new Date(t).toISOString().slice(0, 10)), () => ({ signins: 0, ids: new Set() }));
+    day.ids.add(id); if (sessionOf(e)) A.sessions.add(sessionOf(e));
+    p.since = Math.min(p.since, t); p.fresh += ch.FirstTimeUser ? 1 : 0;
+    if (t >= p.t) { p.t = t; p.region = ch.OnlineRegion; p.cregion = ch.ClassificationRegion; p.lang = ch.Language; p.audio = ch.LanguageAudio; }
+    for (const r of d.Rewards || []) { const x = cell(A.rewards, [d.Source || (kind === 'ClientXPRecord' ? 'Level up' : 'Challenge'), r.Type, r.Name].join('|'), () => ({ n: 0, total: 0 })); x.n++; x.total += r.Amount || 0; }
+    if (['ClientXPRecord', 'ClientRewardRecord', 'ClientChallengeUpdateRecord'].includes(kind) && d.CurrencyBalance != null && newest(id, 'bal', t)) p.bal = d.CurrencyBalance;
+    if (['ClientLoginRecord', 'ClientPurchaseRecord'].includes(kind) && d.Founder != null && newest(id, 'founder', t)) p.founder = d.Founder;
+    if (kind === 'ClientLoginRecord') { A.logins++; day.signins++; }
+    else if (kind === 'ClientRoundRecord') A.late += d.LateJoiner ? 1 : 0;
+    else if (kind === 'ClientXPRecord') { if (d.Category === 'Global') { A.xp.n++; A.xp.gain += d.XPNew - d.XPOld; } A.xp.ups += d.LevelNew > d.LevelOld ? 1 : 0; }
+    else if (kind === 'ClientChallengeUpdateRecord') { A.challN++;
+      const c = cell(A.chall, d.Name, () => ({ cat: d.Category, taken: 0, done: 0, declined: 0, upd: 0, pay: 0 }));
+      if (d.Event === 'ChallengeNew') c.taken++; else if (d.Event === 'ChallengeDecline') c.declined++;
+      else { c.upd++; if (d.ProgressNew >= d.ProgressMax) { c.done++; c.pay += sumv((d.Rewards || []).map(r => r.Amount)); } } }
+    else if (kind === 'ClientPurchaseRecord') { const s = A.store, ok = d.Result === 'Success' ? 1 : 0, paid = ok ? d.SalePrice || 0 : 0; s.n++; s.ok += ok; s.paid += paid;
+      const it = cell(s.items, d.OfferID, () => ({ name: d.Name, kind: d.OfferType, n: 0, ok: 0, paid: 0, list: 0 })); it.n++; it.ok += ok; it.paid += paid; it.list += d.ListPrice || 0;
+      for (const [dim, v] of [['ctx', d.Context], ['pay', d.Method], ['kind', d.OfferType], ['fd', d.Founder === 'Yes' ? 'Founder' : d.Founder === 'No' ? 'Not a Founder' : 'Unknown'], ['res', d.Result]]) {
+        const x = cell(cell(s.by, dim, () => ({})), v ?? '', () => ({ n: 0, ok: 0 })); x.n++; x.ok += ok; } }
+    else if (kind === 'ClientMatchmakingRecord') {       // one queue attempt; it reached a match when it carries a game session id
+      const ok = +d.GameSessionId ? 1 : 0, dur = b.Duration || 0, h = new Date(t).getUTCHours();
+      const q = cell(A.mm, [ver(e), d.GameMode, d.MatchType === 'Ranked' ? 'R' : 'N'].join('|'), () => ({ n: 0, ok: 0, dur: 0, dodges: 0, team: {}, type: {}, hourN: Array(24).fill(0), hourDur: Array(24).fill(0), stages: {}, reasons: {} }));
+      q.n++; q.dodges += d.QueueDodger ? 1 : 0; p.q.n++; p.q.dodges += d.QueueDodger ? 1 : 0;
+      if (ok) { q.ok++; q.dur += dur; q.hourN[h]++; q.hourDur[h] += dur; p.q.ok++; p.q.dur += dur;
+        for (const [o, k] of [[q.team, d.PlayerTeam], [q.type, d.MatchType]]) { const x = cell(o, k, () => ({ n: 0, dur: 0 })); x.n++; x.dur += dur; } }
+      for (const ev of d.Events || []) {
+        if (ev.Type === 'LeftQueue') { const r = cell(q.reasons, ev.Data, () => ({ n: 0, at: 0 })); r.n++; r.at += ev.TimeStamp || 0; continue; }
+        const s = cell(q.stages, ev.Type === 'LobbyState' ? ev.Data : ev.Type, () => ({ n: 0, at: 0, pl: 0, lobby: ev.Type === 'LobbyState' })); s.n++; s.at += ev.TimeStamp || 0; s.pl += ev.Val || 0; } }
+  }
+  for (const e of starts) { A.unfin.n++; bump(A.unfin.by, e.ServerRoundHeader.GameMode + '|' + e.ServerRoundHeader.MatchType); }
+  return A;
+}
+// Each player's own progression history for their page: account XP gains, rewards, and where each challenge stands. tools/summarize.js
+// files it per player and day beside their matches (archive/site/p), so one player's history is loaded only when they are opened.
+function ledger(events) {
+  const L = {};
+  for (const e of events) {
+    const id = e.ClientHeader?.My2kID, d = e.Data || {}, t = T(e), kind = e.EventName;
+    if (!id) continue;
+    const p = cell(L, id, () => ({ xp: [], rewards: [], chall: {} }));
+    if (kind === 'ClientXPRecord' && d.Category === 'Global') p.xp.push({ t, gain: d.XPNew - d.XPOld, up: d.LevelNew > d.LevelOld ? 1 : 0 });
+    for (const r of d.Rewards || []) p.rewards.push({ t, why: d.Source || (kind === 'ClientXPRecord' ? 'Level up' : 'Challenge'), name: r.Name, amount: r.Amount });
+    if (kind === 'ClientChallengeUpdateRecord' && t >= (p.chall[d.Name]?.t || 0)) p.chall[d.Name] = { t, cat: d.Category, ev: d.Event, pn: d.ProgressNew, pm: d.ProgressMax };
+  }
+  return L;
+}
+// On the page: the stored account totals, or, without them, the loaded records counted here.
+const ACC = SUM?.account || (window.SUMMARY ? SUMMARY.plain(account(EVENTS, UNFINISHED.map(r => r.start))) : null);
+const acct = id => ACC.players[id];
 // Pick rate means the same thing everywhere on the site (owner's rule): the share of matches the thing appeared in,
 // 100% = it was in every match. Only people count: a slot filled by a bot is left out of both halves of the sum, so a
 // class's characters always add up to 100%. `group` is a class for characters, or 'hunter' / 'monster' for perks.
@@ -341,7 +397,7 @@ const endsTable = (id, ends, total) => table(id, [Tx('Ending', e => e.k, e => { 
 const HEAT = [['all', 'All fights'], ['caught', 'Monster caught'], ['dmg', 'Monster damage'], ['downs', 'Hunters down'], ['s1', 'Stage 1'], ['s2', 'Stage 2'], ['s3', 'Stage 3'], ['move', 'Movement'], ['fps', 'Frame rate']];
 function heat(mapKey, domes, view = 'all', numbered = false) {
   const info = mapInfo(mapKey), b = C.maps[mapKey.split('|')[0].toLowerCase()]?.bounds || [0, 0, 1, 1];
-  if (view === 'move' || view === 'fps') return `<div class="heat">${img(info.minimap, '', info.name)}<div class="none">No data. The game builds this record but never switches it on (${REC.profiling.length} received).</div></div>`;
+  if (view === 'move' || view === 'fps') return `<div class="heat">${img(info.minimap, '', info.name)}<div class="none">No data. The game builds this record but never switches it on (${num(ACC.records.ClientProfilingRecord?.n || 0)} received).</div></div>`;
   const pts = domes.filter(d => view === 'caught' ? d.caught : view === 'dmg' ? d.dmg : view === 'downs' ? d.downs : view[0] === 's' ? d.stage === +view[1] : true)
     .map(d => ({ ...d, wt: view === 'dmg' ? d.dmg : view === 'downs' ? d.downs : 1 }));
   const mx = Math.max(1, ...pts.map(p => p.wt));
@@ -514,7 +570,7 @@ function ranked() {
     const h = p.rk.h, m = p.rk.m, lad = k.view === 'h' ? h : k.view === 'm' ? m : { n: h.n + m.n, w: h.w + m.w, d: h.d + m.d, rating: Math.max(h.rating || 0, m.rating || 0) || null };
     const placed = k.view === 'o' ? h.n >= 10 || m.n >= 10 : lad.n >= 10;   // the game places a player after 10 ranked matches on a ladder
     const mains = Object.values(p.chars).filter(c => k.view === 'o' || (charInfo(c.id).class === 'Monster') === (k.view === 'm')).sort((a, b) => b.n - a.n).slice(0, 3);
-    return { id: p.id, ...lad, placed, div: placed ? division(lad.rating) : null, mains, cls: charInfo(mains[0]?.id).class, region: PX[p.id]?.region };
+    return { id: p.id, ...lad, placed, div: placed ? division(lad.rating) : null, mains, cls: charInfo(mains[0]?.id).class, region: acct(p.id)?.region };
   }).filter(p => p.n && (!k.tier || p.div?.tier === k.tier) && (!k.cls || p.cls === k.cls) && (!k.region || p.region === k.region) && (!k.q || pname(p.id).toLowerCase().includes(k.q.toLowerCase())));
   const wr = p => pct(p.w, p.d) || 0;
   players.sort((a, b) => k.sort === 'winrate' ? wr(b) - wr(a) : k.sort === 'wins' ? b.w - a.w : (b.placed - a.placed) || (b.rating || 0) - (a.rating || 0) || wr(b) - wr(a));
@@ -523,7 +579,7 @@ function ranked() {
   return `<h1>Ranked</h1><p class="sub">The ranked leaderboard, from ranked matches only. Hunters and Monsters have separate ladders; a player is placed after 10 matches on a ladder.</p>
   ${tabs('rk.view', [['o', 'Overall'], ['h', 'Hunter'], ['m', 'Monster']], k.view)}
   <div class="filters">${tabs('rk.tier', [['', 'All'], tierBtn('gold'), tierBtn('silver'), tierBtn('bronze')], k.tier).replace('class="tabs"', 'class="tabs" style="margin:0"')}
-    ${select('rk.cls', ROLES, k.cls, 'All classes')}${select('rk.region', [...new Set(Object.values(PX).map(p => p.region))].sort().map(r => [r, pretty(r)]), k.region, 'All regions')}
+    ${select('rk.cls', ROLES, k.cls, 'All classes')}${select('rk.region', [...new Set(Object.values(ACC.players).map(p => p.region))].sort().map(r => [r, pretty(r)]), k.region, 'All regions')}
     <input type="search" data-st="rk.q" placeholder="Search player" aria-label="Search player" value="${esc(k.q)}">${select('rk.sort', [['rating', 'Sort: rating'], ['winrate', 'Sort: win rate'], ['wins', 'Sort: wins']], k.sort)}</div>
   <div class="podium">${players.slice(0, 3).map((p, i) => `<div><div class="rk" style="color:${['#ffd700', '#cfd2d4', '#cd7f3a'][i]}">#${i + 1}</div>${p.div ? img(p.div.icon, '', p.div.name) : ''}
     <div><b>${plink(p.id)}</b></div><div class="wr">${fpct(pct(p.w, p.d))}</div><div class="dim">${p.w}-${p.d - p.w} · ${p.div ? esc(p.div.name) : 'In placement'}</div></div>`).join('')}</div>
@@ -539,39 +595,46 @@ function players() {
   const q = ST.players.q.trim().toLowerCase(), fav = p => Object.values(p.chars).sort((a, b) => b.n - a.n)[0];
   return `<h1>Players</h1><p class="sub">Everyone whose game has reported at least one match.</p>
   <div class="filters"><input type="search" data-st="players.q" placeholder="Search players" aria-label="Search players" value="${esc(ST.players.q)}">
-    ${select('players.region', [...new Set(Object.values(PX).map(p => p.region))].sort().map(r => [r, pretty(r)]), ST.players.region, 'All regions')}</div>
+    ${select('players.region', [...new Set(Object.values(ACC.players).map(p => p.region))].sort().map(r => [r, pretty(r)]), ST.players.region, 'All regions')}</div>
   ${hint('Tap a player to open their profile: characters, ranked ladders, progression, challenges and latest matches.')}
-  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (PX[p.id]?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => p.rating), N('Matches', p => p.n),
+  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => p.rating), N('Matches', p => p.n),
     N('Win rate', p => pct(p.w, p.d), p => bar(pct(p.w, p.d))), N('As Hunter', p => pct(p.h.w, p.h.d), p => p.h.n ? `${fpct(pct(p.h.w, p.h.d))} <span class="dim">(${p.h.n})</span>` : '–'),
     N('As Monster', p => pct(p.m.w, p.m.d), p => p.m.n ? `${fpct(pct(p.m.w, p.m.d))} <span class="dim">(${p.m.n})</span>` : '–'), Tx('Most played', p => charInfo(fav(p).id).name, p => chip(fav(p).id)),
-    Tx('Region', p => pretty(PX[p.id]?.region)), N('Last seen', p => PX[p.id]?.last, p => day(PX[p.id]?.last))],
-    Object.values(ALL.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || PX[p.id]?.region === ST.players.region)), 3, 0, false, p => playerHref(p.id))}
+    Tx('Region', p => pretty(acct(p.id)?.region)), N('Last seen', p => acct(p.id)?.t, p => day(acct(p.id)?.t))],
+    Object.values(ALL.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region)), 3, 0, false, p => playerHref(p.id))}
   <p class="note">Rating is the ranked rating the game reports for the player; it is blank until they have one.</p>`;
 }
 
+// a line of a player's own match list (their file), in the shape matchRow() draws
+const asMatch = r => ({ id: r.id, t: r.t, dur: r.dur, mapKey: r.map, decided: r.win === 'Merc' || r.win === 'Monster', hunterWin: r.win === 'Merc', hdr: { CharacterId: r.c },
+  clients: { [r.role]: { Data: { LateJoiner: r.late, ChatMessagesSent: r.chat } } } });
 function player(id) {
-  // p: their match totals. x: account details (region, language, sign-ins, XP, rewards), which exist only in the loaded recent records
-  const p = ALL.players[id], known = PX[id], x = known || { first: NaN, last: NaN, founder: null, region: '', cregion: '', lang: '', audio: '', isNew: false, logins: 0, mm: [], xp: [], rewards: [], chall: [] };
+  // p: their match totals. a: what their game says about the account. x: their own file, every match and their progression, a section per day
+  const p = ALL.players[id], a = acct(id);
   if (!p) return `<h1>Player not found</h1><p class="sub">No matches reported under this id.</p>`;
-  const gains = x.xp.filter(e => e.Data.Category === 'Global').slice(-30), queues = x.mm.filter(e => +e.Data.GameSessionId), left = x.mm.filter(e => !+e.Data.GameSessionId);
-  const chal = {}; for (const e of x.chall) chal[e.Data.Name] = e;
+  const got = fetchOnce('p/' + id, `${SITE_DATA}/p/${id.slice(-2)}/${encodeURIComponent(id)}.js?t=${Math.floor(Date.now() / 600000)}`, d => { const s = Object.values(d.days);
+    return { matches: s.flatMap(x => x.matches).sort((x, y) => y.t - x.t), xp: s.flatMap(x => x.xp).sort((x, y) => x.t - y.t), rewards: s.flatMap(x => x.rewards).sort((x, y) => y.t - x.t),
+      chall: Object.values(s.reduce((o, x) => { for (const [name, c] of Object.entries(x.chall)) if (c.t >= (o[name]?.t || 0)) o[name] = { name, ...c }; return o; }, {})) }; });
+  const x = typeof got === 'object' ? got : { matches: [], xp: [], rewards: [], chall: [] }, gains = x.xp.slice(-30);
+  const wait = got === 'loading' ? '<p class="dim">Loading this player\'s history…</p>' : got === 'missing' ? '<p class="dim">This player\'s history could not be loaded.</p>' : '';
   const lad = (l, name) => { const dv = l.n >= 10 ? division(l.rating) : null; return kv(name, l.n ? `${dv ? esc(dv.name) : `In placement (${l.n}/10)`} · rating ${num(l.rating)} · ${l.w}-${l.d - l.w}` : 'No ranked matches'); };
-  return `<h1>${esc(pname(id))} ${x.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
-  <p class="sub">${known ? `${esc(pretty(x.region))} · text ${esc(x.lang)} · audio ${esc(x.audio)} · first seen ${day(x.first)} · last seen ${day(x.last)}` : 'Region, language, queue and progression details come from recent records, and none of this player\'s are loaded right now'} · id ${esc(String(id).slice(0, 8))}…</p>
+  return `<h1>${esc(pname(id))} ${a?.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
+  <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
     tile('Account level', num(p.level)), tile('Time played', hours(p.secs)), tile('Play sessions', p.sessions.size ? num(p.sessions.size) : '–', p.sessions.size ? `${dec(p.n / p.sessions.size)} matches each` : 'not recorded'), tile('Chat', dec(p.chat / p.n), 'messages per match'))}
   <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(p.rk.h, 'Hunter ladder')}${lad(p.rk.m, 'Monster ladder')}</div></section>
-    <section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(queues.reduce((a, e) => a + e.BaseHeader.Duration, 0), queues.length)))}${kv('Left the queue', num(left.length))}
-      ${kv('Queue dodges', num(x.mm.filter(e => e.Data.QueueDodger).length))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section></div>
+    <section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(a?.q.dur, a?.q.ok)))}${kv('Left the queue', num(a ? a.q.n - a.q.ok : null))}
+      ${kv('Queue dodges', num(a?.q.dodges))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section></div>
   <h2>Characters</h2>${table('pc-' + id, [Tx('Character', c => charInfo(c.id).name, c => chip(c.id)), Tx('Class', c => charInfo(c.id).class, c => classCell(charInfo(c.id).class)),
     N('Matches', c => c.n), N('Win rate', c => pct(c.w, c.d), c => bar(pct(c.w, c.d))), N('Level', c => c.level), Tx('Usual skin', c => Object.entries(c.skins).sort((a, b) => b[1] - a[1])[0]?.[0]),
     N('Damage dealt', c => avg(c.dmg, c.n)), N('Damage taken', c => avg(c.taken, c.n))], Object.values(p.chars), 2, 0, false, c => charHref(c.id))}
-  <h2>Progression</h2><div class="cols"><section><div class="panel"><h3>Account XP gained, last ${gains.length} matches</h3>${chart(gains.map(e => e.Data.XPNew - e.Data.XPOld), gains.map(e => e.Data.LevelNew > e.Data.LevelOld ? '▲' : ''))}
+  <h2>Progression</h2>${wait}<div class="cols"><section><div class="panel"><h3>Account XP gained, last ${gains.length} times</h3>${chart(gains.map(g => g.gain), gains.map(g => g.up ? '▲' : ''))}
       <p class="note">▲ marks a level-up.</p></div></section>
-    <section>${table('prw-' + id, [N('When', r => r.t, r => day(r.t)), Tx('Why', r => pretty(r.why)), Tx('Reward', r => r.Name), N('Amount', r => r.Amount)], x.rewards, 0, 8)}</section></div>
-  <h2>Challenges</h2>${table('pch-' + id, [Tx('Challenge', e => e.Data.Name), Tx('Category', e => e.Data.Category), Tx('Status', e => pretty(e.Data.Event), e => e.Data.ProgressNew >= e.Data.ProgressMax ? 'Finished' : e.Data.Event === 'ChallengeDecline' ? 'Declined' : 'In progress'),
-    N('Progress', e => pct(e.Data.ProgressNew, e.Data.ProgressMax), e => `${bar(pct(e.Data.ProgressNew, e.Data.ProgressMax))} <span class="dim">${num(e.Data.ProgressNew)} / ${num(e.Data.ProgressMax)}</span>`)], Object.values(chal), 3)}
-  <h2>Latest matches</h2>${p.matches.slice(0, 20).map(m => matchRow(m.m, m.role)).join('')}`;
+    <section>${table('prw-' + id, [N('When', r => r.t, r => day(r.t)), Tx('Why', r => pretty(r.why)), Tx('Reward', r => r.name), N('Amount', r => r.amount)], x.rewards, 0, 8)}</section></div>
+  <h2>Challenges</h2>${table('pch-' + id, [Tx('Challenge', c => c.name), Tx('Category', c => c.cat), Tx('Status', c => c.pn >= c.pm ? 'Finished' : c.ev === 'ChallengeDecline' ? 'Declined' : 'In progress'),
+    N('Progress', c => pct(c.pn, c.pm), c => `${bar(pct(c.pn, c.pm))} <span class="dim">${num(c.pn)} / ${num(c.pm)}</span>`)], x.chall, 3)}
+  <h2>Matches</h2>${wait}${x.matches.slice(0, ST.players.all ? Infinity : 20).map(r => matchRow(asMatch(r), r.role)).join('')}
+  ${x.matches.length > 20 && !ST.players.all ? `<p><button data-st="players.all" data-v="1">Show all ${num(x.matches.length)} matches</button></p>` : ''}`;
 }
 
 function timeline(m) {
@@ -645,14 +708,17 @@ function matches() {
     N('Length', r => r.dur, r => clock(r.dur)), N('Final stage', r => r.stage), Tx('Monster', r => charInfo(r.c.Monster).name, r => faces(r, ['Monster'])), Tx('Hunters', r => '', r => faces(r, HUNTERS)),
     N('People', r => 5 - r.bots.length)], rows, 0, ST.browse.all ? 0 : 200, false, r => '#/match/' + encodeURIComponent(r.id))}
   ${rows.length > 200 && !ST.browse.all ? `<p><button data-st="browse.all" data-v="1">Show all ${num(rows.length)} matches of this day</button></p>` : ''}
-  <p class="note">${num(rows.length)} of this day's ${num(got.rows.length)} matches pass the filters above. The day is the UTC day the match's result reached the server.</p>`;
+  <p class="note">${num(rows.length)} of this day's ${num(got.rows.length)} matches pass the filters above. The day is the UTC day the match's result reached the server.</p>
+  ${got.unfinished?.length ? `<details><summary><b>${num(got.unfinished.length)} matches started this day and never finished</b></summary>${table('mopen', [N('Started (UTC)', r => r.t, r => new Date(r.t).toISOString().slice(11, 16)),
+    Tx('Type', r => typeName(r.type)), Tx('Mode', r => modeName(r.mode)), Tx('Map', r => mapInfo(r.map).name), Tx('Line-up', r => '', r => `<span class="comp">${ROLES.map(x => face(r.c[x])).join('')}</span>`)], got.unfinished, 0)}
+    <p class="note">No end record arrived for these: usually a restart or the host leaving. One still being played when the list was made is here until it ends.</p></details>` : ''}`;
 }
 const day_ = d => day(Date.parse(d + 'T00:00:00Z'));
 
 function match(id) {
   let m = MATCH.get(id);
   if (!m && SUM) {        // not among the loaded recent records: fetch this match's own file
-    const got = fetchOnce('m/' + id, `${SITE_DATA}/m/${id.slice(-2)}/${encodeURIComponent(id)}.js?d=${utcDay()}`, recs => { for (const e of recs) ingest(e, false); const r = byId.get(id); if (r?.round) MATCH.set(id, toMatch(r)); });
+    const got = fetchOnce('m/' + id, `${SITE_DATA}/m/${id.slice(-2)}/${encodeURIComponent(id)}.js?d=${utcDay()}`, recs => { for (const e of recs) ingest(e); const r = byId.get(id); if (r?.round) MATCH.set(id, toMatch(r)); });
     if (got === 'loading') return `<h1>Loading this match…</h1>`;
     m = MATCH.get(id);
   }
@@ -706,24 +772,19 @@ function match(id) {
 }
 
 function matchmaking() {
-  const mm = REC.mm.filter(e => (!ST.fl.v || ver(e) === ST.fl.v) && (!ST.fl.type || (e.Data.MatchType === 'Ranked') === ST.fl.type.startsWith('Ranked')) && (!ST.fl.mode || e.Data.GameMode === ST.fl.mode));
-  const ok = mm.filter(e => +e.Data.GameSessionId), q = l => avg(l.reduce((a, e) => a + e.BaseHeader.Duration, 0), l.length);
-  const byHour = Array.from({ length: 24 }, (_, h) => q(ok.filter(e => new Date(T(e)).getUTCHours() === h)));
-  const stages = {}, reasons = {};
-  for (const e of mm) for (const ev of e.Data.Events || []) {
-    if (ev.Type === 'LeftQueue') { cell(reasons, ev.Data, () => ({ k: ev.Data, n: 0, at: 0 })).n++; reasons[ev.Data].at += ev.TimeStamp; continue; }
-    const k = ev.Type === 'LobbyState' ? ev.Data : ev.Type, s = cell(stages, k, () => ({ k, n: 0, at: 0, pl: 0, lobby: ev.Type === 'LobbyState' })); s.n++; s.at += ev.TimeStamp; s.pl += ev.Val;
-  }
+  // queue attempts are stored per patch, mode and ranked-or-not, so the filter bar picks groups to add up (the solo box does not apply)
+  const pass = k => { const [v, mode, rk] = k.split('|'); return (!ST.fl.v || v === ST.fl.v) && (!ST.fl.mode || mode === ST.fl.mode) && (!ST.fl.type || (rk === 'R') === ST.fl.type.startsWith('Ranked')); };
+  const mm = SUMMARY.merge(Object.keys(ACC.mm).filter(pass).map(k => ACC.mm[k])) || { n: 0, ok: 0, dur: 0, dodges: 0, team: {}, type: {}, hourN: [], hourDur: [], stages: {}, reasons: {} };
+  const q = x => x ? avg(x.dur, x.n) : null, byHour = Array.from({ length: 24 }, (_, h) => avg(mm.hourDur[h], mm.hourN[h])), rows = o => Object.entries(o).map(([k, v]) => ({ k, ...v }));
   const gaps = Object.keys(S.even).map(Number).sort((a, b) => a - b);
   return `<h1>Matchmaking</h1><p class="sub">How long queues take, how far queue attempts get, and how even the matches are. Custom games never queue, so they are not here.</p>${filterBar()}
-  ${tiles(tile('Queue attempts', num(mm.length)), tile('Average queue', clock(q(ok)), 'when a match was found'), tile('Reached a match', fpct(pct(ok.length, mm.length))), tile('Left the queue', fpct(pct(mm.length - ok.length, mm.length))),
-    tile('Hunter queue', clock(q(ok.filter(e => e.Data.PlayerTeam === 'Merc')))), tile('Monster queue', clock(q(ok.filter(e => e.Data.PlayerTeam === 'Monster')))),
-    tile('Ranked queue', clock(q(ok.filter(e => e.Data.MatchType === 'Ranked')))), tile('Arcade queue', clock(q(ok.filter(e => e.Data.MatchType === 'Hunt')))))}
-  <h2>Queue time through the day</h2><div class="panel">${chart(byHour, byHour.map((_, h) => String(h).padStart(2, '0')), clock)}<p class="note">Average queue by hour (UTC).</p></div>
-  <div class="cols"><section><h2>How far queue attempts get</h2>${table('mmst', [Tx('Step', s => pretty(s.k)), N('Reached', s => s.n), N('Share', s => pct(s.n, mm.length), s => bar(pct(s.n, mm.length))),
-      N('Time to reach', s => s.at / s.n, s => clock(s.at / s.n)), N('Players in lobby', s => s.lobby ? s.pl / s.n : null, s => s.lobby ? dec(s.pl / s.n) : '–')], Object.values(stages), 1)}</section>
-    <section><h2>Why people leave</h2>${table('mmwhy', [Tx('Reason', r => pretty(r.k)), N('Times', r => r.n), N('After', r => r.at / r.n, r => clock(r.at / r.n))], Object.values(reasons), 1)}
-      <p class="note">${num(mm.filter(e => e.Data.QueueDodger).length)} of these were queue dodges: leaving a ranked lobby that already had a Hunter and a Monster.</p></section></div>
+  ${tiles(tile('Queue attempts', num(mm.n)), tile('Average queue', clock(avg(mm.dur, mm.ok)), 'when a match was found'), tile('Reached a match', fpct(pct(mm.ok, mm.n))), tile('Left the queue', fpct(pct(mm.n - mm.ok, mm.n))),
+    tile('Hunter queue', clock(q(mm.team.Merc))), tile('Monster queue', clock(q(mm.team.Monster))), tile('Ranked queue', clock(q(mm.type.Ranked))), tile('Arcade queue', clock(q(mm.type.Hunt))))}
+  <h2>Queue time through the day</h2><div class="panel">${chart(byHour, byHour.map((_, h) => String(h).padStart(2, '0')), clock)}<p class="note">Average queue by hour (UTC).${ST.fl.mode ? ' Most queue attempts are recorded without a mode, so with a mode picked only the ones that name it are counted.' : ''}</p></div>
+  <div class="cols"><section><h2>How far queue attempts get</h2>${table('mmst', [Tx('Step', s => pretty(s.k)), N('Reached', s => s.n), N('Share', s => pct(s.n, mm.n), s => bar(pct(s.n, mm.n))),
+      N('Time to reach', s => s.at / s.n, s => clock(s.at / s.n)), N('Players in lobby', s => s.lobby ? s.pl / s.n : null, s => s.lobby ? dec(s.pl / s.n) : '–')], rows(mm.stages), 1)}</section>
+    <section><h2>Why people leave</h2>${table('mmwhy', [Tx('Reason', r => pretty(r.k)), N('Times', r => r.n), N('After', r => r.at / r.n, r => clock(r.at / r.n))], rows(mm.reasons), 1)}
+      <p class="note">${num(mm.dodges)} queue attempts were queue dodges: leaving a ranked lobby that already had a Hunter and a Monster.</p></section></div>
   <div class="cols"><section><h2>Parties and the health buff</h2>${table('mmparty', [Tx('Parties in the lobby', x => x.k.split('|')[0]), Tx('Hunter health buff', x => x.k.split('|')[1] || 'None'), N('Matches', x => x.n),
       N('Hunters win', x => pct(x.w, x.d), x => `<span class="c-Medic">${bar(pct(x.w, x.d))}</span>`)], Object.entries(S.party).map(([k, v]) => ({ k, ...v })), 2)}</section>
     <section><h2>How even matches are</h2><div class="panel c-Medic">${chart(gaps.map(g => pct(S.even[g].w, S.even[g].d)), gaps.map(g => (g > 0 ? '+' : '') + g), fpct)}
@@ -731,39 +792,34 @@ function matchmaking() {
 }
 
 function progression() {
-  const xp = REC.xp, glob = xp.filter(e => e.Data.Category === 'Global'), ups = xp.filter(e => e.Data.LevelNew > e.Data.LevelOld);
-  const rewards = Object.values(PX).flatMap(p => p.rewards), keys = rewards.filter(r => r.Type === 'Currency');
-  const tracks = ['Global', ...Object.keys(C.characters).filter(c => xp.some(e => e.Data.Category === c))], latest = {}, bal = {};
-  for (const e of xp) { if (e.Data.Category === ST.prog.track) latest[e.ClientHeader.My2kID] = e.Data.LevelNew; }
-  for (const e of [...xp, ...REC.reward, ...REC.chall]) bal[e.ClientHeader.My2kID] = e.Data.CurrencyBalance;
-  const mxl = Math.max(1, ...Object.values(latest)), lv = Array(Math.ceil((mxl + 1) / 5)).fill(0); for (const v of Object.values(latest)) lv[Math.floor(v / 5)]++;
-  const kb = Array(11).fill(0); for (const v of Object.values(bal)) kb[Math.min(10, Math.floor(v / 1000))]++;
-  const src = {}; for (const r of rewards) { const s = cell(src, [r.why, r.Type, r.Name].join('|'), () => ({ ...r, n: 0, total: 0 })); s.n++; s.total += r.Amount; }
-  const ch = {}; for (const e of REC.chall) { const c = cell(ch, e.Data.Name, () => ({ name: e.Data.Name, cat: e.Data.Category, taken: 0, done: 0, declined: 0, upd: 0, pay: 0 }));
-    if (e.Data.Event === 'ChallengeNew') c.taken++; else if (e.Data.Event === 'ChallengeDecline') c.declined++; else { c.upd++; if (e.Data.ProgressNew >= e.Data.ProgressMax) { c.done++; c.pay = sumv((e.Data.Rewards || []).map(r => r.Amount)); } } }
+  const A = ACC, people = Object.values(ALL.players), src = Object.entries(A.rewards).map(([k, r]) => { const [why, type, ...name] = k.split('|'); return { why, type, name: name.join('|'), ...r }; });
+  // levels come with each player's own match record: the account level, and the level of the character they played
+  const tracks = ['Global', ...Object.keys(C.characters).filter(c => people.some(p => p.chars[c]?.level != null))];
+  const latest = people.map(p => ST.prog.track === 'Global' ? p.level : p.chars[ST.prog.track]?.level).filter(v => v != null);
+  const lv = Array(Math.ceil((latest.reduce((a, v) => Math.max(a, v), 1) + 1) / 5)).fill(0); for (const v of latest) lv[Math.floor(v / 5)]++;
+  const kb = A.keyHist || SUMMARY.keyHist(A.players);
   return `<h1>Progression</h1><p class="sub">XP, levels, Silver Keys, rewards and challenges, as the profile service reported them to each player's game.</p>
-  ${tiles(tile('XP per match', dec(avg(glob.reduce((a, e) => a + e.Data.XPNew - e.Data.XPOld, 0), glob.length)), 'account XP'), tile('Level-ups', num(ups.length)), tile('Keys earned', num(keys.reduce((a, r) => a + r.Amount, 0))),
-    tile('Rewards granted', num(rewards.length)), tile('Challenge updates', num(REC.chall.length)))}
+  ${tiles(tile('XP per match', dec(avg(A.xp.gain, A.xp.n)), 'account XP'), tile('Level-ups', num(A.xp.ups)), tile('Keys earned', num(src.filter(r => r.type === 'Currency').reduce((a, r) => a + r.total, 0))),
+    tile('Rewards granted', num(src.reduce((a, r) => a + r.n, 0))), tile('Challenge updates', num(A.challN)))}
   <h2>Level spread</h2><div class="filters"><label>Track ${select('prog.track', tracks.map(t => [t, t === 'Global' ? 'Account' : charInfo(t).name]), ST.prog.track)}</label></div>
-  <div class="panel">${chart(lv, lv.map((_, i) => `${i * 5}-${i * 5 + 4}`))}<p class="note">Players by their latest level on this track.</p></div>
-  <h2>Rewards by source</h2>${table('rsrc', [Tx('Source', r => pretty(r.why)), Tx('Kind', r => r.Type), Tx('Reward', r => r.Name), N('Times', r => r.n), N('Total', r => r.total), N('Each', r => r.total / r.n)], Object.values(src), 3)}
+  <div class="panel">${chart(lv, lv.map((_, i) => `${i * 5}-${i * 5 + 4}`))}<p class="note">${num(latest.length)} players by their level on this track, as their game reported it with their newest match.</p></div>
+  <h2>Rewards by source</h2>${table('rsrc', [Tx('Source', r => pretty(r.why)), Tx('Kind', r => r.type), Tx('Reward', r => r.name), N('Times', r => r.n), N('Total', r => r.total), N('Each', r => r.total / r.n)], src, 3)}
   <h2>Challenges</h2>${table('chal', [Tx('Challenge', c => c.name), Tx('Category', c => c.cat), N('Taken', c => c.taken), N('Finished', c => c.done), N('Declined', c => c.declined),
-    N('Updates to finish', c => c.done ? c.upd / c.done : null, c => c.done ? dec(c.upd / c.done) : '–'), N('Reward', c => c.pay || null)], Object.values(ch), 2)}
-  <h2>Silver Key balances</h2><div class="panel">${chart(kb, kb.map((_, i) => i === 10 ? '10k+' : i + 'k'))}<p class="note">Players by key balance. Totals only; individual balances are not shown.</p></div>`;
+    N('Updates to finish', c => c.done ? c.upd / c.done : null, c => c.done ? dec(c.upd / c.done) : '–'), N('Reward', c => c.done ? c.pay / c.done : null)], Object.entries(A.chall).map(([name, c]) => ({ name, ...c })), 2)}
+  <h2>Silver Key balances</h2><div class="panel">${chart(kb, kb.map((_, i) => i === 10 ? '10k+' : i + 'k'))}<p class="note">${num(sumv(kb))} players by their latest key balance. Totals only; individual balances are not shown.</p></div>`;
 }
 
 function store() {
-  const p = REC.purchase, ok = p.filter(e => e.Data.Result === 'Success'), items = {};
-  for (const e of p) { const it = cell(items, e.Data.OfferID, () => ({ ...e.Data, n: 0, ok: 0, paid: 0 })); it.n++; if (e.Data.Result === 'Success') { it.ok++; it.paid += e.Data.SalePrice; } }
-  const by = (id, label, key) => table(id, [Tx(label, x => pretty(x.k) || 'Not recorded'), N('Attempts', x => x.n), N('Completed', x => x.ok), P('Share', x => pct(x.n, p.length))],
-    Object.values(p.reduce((o, e) => { const x = cell(o, key(e), () => ({ k: key(e), n: 0, ok: 0 })); x.n++; x.ok += e.Data.Result === 'Success' ? 1 : 0; return o; }, {})), 1);
+  const s = ACC.store;
+  const by = (id, label, dim) => table(id, [Tx(label, x => pretty(x.k) || 'Not recorded'), N('Attempts', x => x.n), N('Completed', x => x.ok), P('Share', x => pct(x.n, s.n))],
+    Object.entries(s.by[dim] || {}).map(([k, v]) => ({ k, ...v })), 1);
   return `<h1>Store</h1><p class="sub">What gets bought in the in-game Store. Totals only; nobody's purchases are shown by name.</p>
-  ${tiles(tile('Purchase attempts', num(p.length)), tile('Completed', num(ok.length), fpct(pct(ok.length, p.length))), tile('Not completed', num(p.length - ok.length), 'cancelled or failed'), tile('Keys spent', num(ok.reduce((a, e) => a + e.Data.SalePrice, 0))))}
-  <h2>Most bought</h2>${table('store', [Tx('Item', i => i.Name), Tx('Kind', i => i.OfferType), Tx('Offer', i => i.OfferID), N('List price', i => i.ListPrice), N('Average paid', i => i.ok ? i.paid / i.ok : null),
-    N('Attempts', i => i.n), N('Bought', i => i.ok)], Object.values(items), 6)}
-  <div class="cols"><section><h2>Where purchases start</h2>${by('st-ctx', 'Screen', e => e.Data.Context)}</section><section><h2>How they are paid</h2>${by('st-pay', 'Method', e => e.Data.Method)}</section></div>
-  <div class="cols"><section><h2>By kind</h2>${by('st-kind', 'Kind', e => e.Data.OfferType)}</section><section><h2>Founders against everyone else</h2>${by('st-f', 'Founder', e => e.Data.Founder === 'Yes' ? 'Founder' : e.Data.Founder === 'No' ? 'Not a Founder' : 'Unknown')}</section></div>
-  <h2>Outcomes</h2>${by('st-res', 'Result', e => e.Data.Result)}`;
+  ${tiles(tile('Purchase attempts', num(s.n)), tile('Completed', num(s.ok), fpct(pct(s.ok, s.n))), tile('Not completed', num(s.n - s.ok), 'cancelled or failed'), tile('Keys spent', num(s.paid)))}
+  <h2>Most bought</h2>${table('store', [Tx('Item', i => i.name), Tx('Kind', i => i.kind), Tx('Offer', i => i.id), N('List price', i => avg(i.list, i.n)), N('Average paid', i => i.ok ? i.paid / i.ok : null),
+    N('Attempts', i => i.n), N('Bought', i => i.ok)], Object.entries(s.items).map(([id, i]) => ({ id, ...i })), 6)}
+  <div class="cols"><section><h2>Where purchases start</h2>${by('st-ctx', 'Screen', 'ctx')}</section><section><h2>How they are paid</h2>${by('st-pay', 'Method', 'pay')}</section></div>
+  <div class="cols"><section><h2>By kind</h2>${by('st-kind', 'Kind', 'kind')}</section><section><h2>Founders against everyone else</h2>${by('st-f', 'Founder', 'fd')}</section></div>
+  <h2>Outcomes</h2>${by('st-res', 'Result', 'res')}`;
 }
 
 function dialogue() {
@@ -778,39 +834,37 @@ function dialogue() {
 }
 
 function community() {
-  const cl = EVENTS.filter(e => e.ClientHeader), dayKey = e => new Date(T(e)).toISOString().slice(0, 10), days = [...new Set(cl.map(dayKey))].sort().slice(-28);
-  const active = days.map(dk => new Set(cl.filter(e => dayKey(e) === dk).map(e => e.ClientHeader.My2kID)).size), signins = days.map(dk => REC.login.filter(e => dayKey(e) === dk).length);
-  const people = Object.values(PX), founders = people.filter(p => p.founder === 'Yes').length, sessions = new Set(cl.map(sessionOf).filter(Boolean)).size;
+  const A = ACC, people = Object.values(A.players), days = Object.keys(A.daily).sort().slice(-28), founders = people.filter(p => p.founder === 'Yes').length;
+  const active = days.map(d => A.daily[d].active ?? A.daily[d].ids.length), signins = days.map(d => A.daily[d].signins), sessions = A.sessN ?? A.sessions.length;
   const split = (id, label, key) => table(id, [Tx(label, x => pretty(x.k)), N('Players', x => x.n), N('Share', x => pct(x.n, people.length), x => bar(pct(x.n, people.length)))], count(people, key), 1);
-  const vers = {}; for (const e of EVENTS) { const v = cell(vers, `${ver(e)} · build ${build(e)} · ${e.BaseHeader.Platform}`, () => ({ n: 0, last: 0 })); v.n++; v.last = Math.max(v.last, T(e)); }
   return `<h1>Community</h1><p class="sub">Who is playing, where and when.</p>
-  ${tiles(tile('Players', num(people.length)), tile('Active on the last day', num(active.at(-1))), tile('Sign-ins', num(REC.login.length)), tile('New players', num(people.filter(p => p.isNew).length)),
+  ${tiles(tile('Players', num(people.length), 'whose game has sent a record'), tile('Active on the last day', num(active.at(-1)), days.length ? day_(days.at(-1)) + ', so far' : ''), tile('Sign-ins', num(A.logins)), tile('New players', num(people.filter(p => p.fresh).length)),
     tile('Founders', fpct(pct(founders, people.length)), `${num(founders)} players`), tile('Play sessions', sessions ? num(sessions) : '–'))}
   <div class="cols"><section><h2>Active players per day</h2><div class="panel">${chart(active, days.map(d => d.slice(8)))}</div></section>
     <section><h2>Sign-ins per day</h2><div class="panel">${chart(signins, days.map(d => d.slice(8)))}</div></section></div>
+  <p class="note">Days are UTC. A player is active on a day when their game sent any record that day.</p>
   <div class="cols"><section><h2>Regions</h2>${split('reg', 'Online region', p => p.region)}</section><section><h2>Ratings regions</h2>${split('creg', 'Ratings region', p => p.cregion)}</section></div>
   <div class="cols"><section><h2>Text language</h2>${split('lang', 'Language', p => p.lang)}</section><section><h2>Audio language</h2>${split('alang', 'Language', p => p.audio)}</section></div>
-  <h2>Patches, game build and platform</h2>${table('vers', [Tx('Patch · build · platform', v => v.k), N('Records', v => v.n), N('Last seen', v => v.last, v => day(v.last))], Object.entries(vers).map(([k, v]) => ({ k, ...v })), 2)}`;
+  <h2>Patches, game build and platform</h2>${table('vers', [Tx('Patch · build · platform', v => v.k), N('Records', v => v.n), N('Last seen', v => v.t, v => day(v.t))], Object.entries(A.vers).map(([k, v]) => ({ k, ...v })), 2)}`;
 }
 
 function fairplay() {
-  const lateClients = EVENTS.filter(e => e.EventName === 'ClientRoundRecord' && e.Data.LateJoiner).length, kicks = {};
-  for (const e of REC.kick) { const k = cell(kicks, e.Data.code + '|' + e.Data.message, () => ({ code: e.Data.code, msg: e.Data.message, n: 0, last: 0 })); k.n++; k.last = Math.max(k.last, T(e)); }
+  const A = ACC, kicks = Object.entries(A.kicks).map(([k, v]) => { const [code, ...msg] = k.split('|'); return { code, msg: msg.join('|'), ...v }; });
   return `<h1>Fair play</h1><p class="sub">Leavers, queue dodgers, late joins and anti-cheat kicks. Counts only; nobody is named here.</p>
-  ${tiles(tile('Matches with a leaver', fpct(pct(ALL.leaverMatches, MATCHES.length)), `${num(ALL.leaverMatches)} of ${num(MATCHES.length)}`), tile('Disconnects', num(sumv(ALL.leavers))),
-    tile('Queue dodges', num(REC.mm.filter(e => e.Data.QueueDodger).length)), tile('Late joins', num(lateClients), 'reported by players'), tile('Anti-cheat kicks', num(REC.kick.length)),
-    tile('Never finished', num(UNFINISHED.length), 'matches that started'))}
-  <div class="cols"><section><h2>Disconnects by class</h2>${table('leav', [Tx('Class', r => r.k, r => classCell(r.k)), N('Disconnects', r => r.n), P('Share of matches', r => pct(r.n, MATCHES.length))],
+  ${tiles(tile('Matches with a leaver', fpct(pct(ALL.leaverMatches, ALL.total)), `${num(ALL.leaverMatches)} of ${num(ALL.total)}`), tile('Disconnects', num(sumv(ALL.leavers))),
+    tile('Queue dodges', num(Object.values(A.mm).reduce((a, q) => a + q.dodges, 0))), tile('Late joins', num(A.late), 'reported by players'), tile('Anti-cheat kicks', num(kicks.reduce((a, k) => a + k.n, 0))),
+    tile('Never finished', num(A.unfin.n), 'matches that started'))}
+  <div class="cols"><section><h2>Disconnects by class</h2>${table('leav', [Tx('Class', r => r.k, r => classCell(r.k)), N('Disconnects', r => r.n), P('Share of matches', r => pct(r.n, ALL.total))],
       ROLES.map(k => ({ k, n: ALL.leavers[k] || 0 })), 1)}</section>
-    <section><h2>Anti-cheat kicks</h2>${table('kicks', [N('Code', k => k.code), Tx('Message', k => k.msg), N('Times', k => k.n), N('Last', k => k.last, k => day(k.last))], Object.values(kicks), 2)}</section></div>
-  <h2>Matches that started but never finished</h2>${table('unfin', [N('Started', r => T(r.start), r => day(T(r.start))), Tx('Map', r => mapInfo(r.start.ServerRoundHeader.Map).name), Tx('Mode', r => modeName(r.start.ServerRoundHeader.GameMode)),
-    Tx('Match type', r => typeName(r.start.ServerRoundHeader.MatchType)), Tx('Line-up', r => '', r => `<span class="comp">${ROLES.map(x => face(r.start.ServerRoundHeader.CharacterId[x])).join('')}</span>`)], UNFINISHED, 0)}
-  <p class="note">A start with no end usually means the match was restarted or the host left. The game also drops the end record when a match is restarted.</p>`;
+    <section><h2>Anti-cheat kicks</h2>${table('kicks', [Tx('Code', k => k.code), Tx('Message', k => k.msg), N('Times', k => k.n), N('Last', k => k.t, k => day(k.t))], kicks, 2)}</section></div>
+  <h2>Matches that started but never finished</h2>${table('unfin', [Tx('Mode', r => modeName(r.k.split('|')[0])), Tx('Match type', r => typeName(r.k.split('|')[1])), N('Matches', r => r.n), N('Share', r => pct(r.n, A.unfin.n), r => bar(pct(r.n, A.unfin.n)))],
+    Object.entries(A.unfin.by).map(([k, n]) => ({ k, n })), 2)}
+  <p class="note">A start with no end usually means the match was restarted or the host left. The game also drops the end record when a match is restarted. A match still being played when the totals were last updated is counted here until its end record arrives.</p>`;
 }
 
 function about() {
-  const ctx = [...new Set(EVENTS.map(e => e.BaseHeader.Context).filter(Boolean))], one = f => [...new Set(EVENTS.map(f).filter(v => v !== undefined))].map(v => v === '' ? '(empty)' : v).join(', ');
-  const dist = [...new Set(MATCHES.map(m => m.d.Monster?.TotalDistanceTraveled))].join(', ');
+  const A = ACC, one = f => Object.keys(A.hdr[f] || {}).map(v => v === '' ? '(empty)' : v).join(', '), ctx = Object.keys(A.hdr.Context || {}).filter(Boolean);
+  const dist = Object.keys(ALL.dist || {}).join(', '), leftOut = SUM ? SUM.recordsLeftOut : LEFT_OUT;
   const feeds = [['Characters, Matchups, Perks, Maps, Match page', 'ServerRoundRecord', 'The PC hosting the match'], ['Weapon, ability, stage and source numbers', 'ServerPlayer Assault / Trapper / Medic / Support / Monster records', 'The PC hosting the match'],
     ['Fight heatmap, dome list', 'ServerDomeRecord', 'The PC hosting the match'], ['Lobby panel, unfinished matches', 'ServerRoundStartRecord', 'The PC hosting the match'], ['Dialogue', 'ServerDialogueRecord', 'The PC hosting the match'],
     ['Anti-cheat kicks', 'ServerEACClientKickRecord', 'The PC hosting the match'], ['Players, Ranked, skins, chat, late joins', 'ClientRoundRecord', "Each player's own game"], ['Matchmaking', 'ClientMatchmakingRecord', "Each player's own game"],
@@ -818,24 +872,26 @@ function about() {
     ['Community: sign-ins, Founders', 'ClientLoginRecord', "Each player's own game"], ['Movement and frame-rate heatmaps', 'ClientProfilingRecord', 'Nobody: never switched on']];
   return `<h1>About the data</h1><p class="sub">Evolve Stage 2 builds a set of records about every match, queue attempt and sign-in. This site only reads those records.</p>
   <h2>What each page is built from</h2><div class="tw"><table><thead><tr><th>Page</th><th>Record</th><th>Sent by</th></tr></thead><tbody>${feeds.map(f => `<tr><td>${f[0]}</td><td>${f[1]}</td><td>${f[2]}</td></tr>`).join('')}</tbody></table></div>
-  <h2>Records received</h2>${table('recs', [Tx('Record', r => r.k), N('Received', r => r.n), N('Last seen', r => r.last, r => day(r.last)), Tx('Data version', r => [...r.versions].join(', '))], Object.entries(COUNTS).map(([k, v]) => ({ k, ...v })), 1)}
-  <h2>Record details</h2><div class="panel">${kv('Build configuration', esc(one(e => e.BaseHeader.Config)))}${kv('Platform', esc(one(e => e.BaseHeader.Platform)))}${kv('Change-list number', esc(one(e => e.BaseHeader.Changelist)))}
-    ${kv('Build number', esc(one(e => e.BaseHeader.BuildNumber)))}${kv('Micro-patch version', esc(one(e => e.BaseHeader.Micropatch)))}${kv('Context tags seen', esc(ctx.join(', ') || 'none'))}
-    ${kv('Application id', esc(one(e => e.BaseHeader.PublicAppID)))}${kv('Header versions', `base ${esc(one(e => e.BaseHeader.Version))} · player ${esc(one(e => e.ClientHeader?.Version))} · match ${esc(one(e => e.ServerRoundHeader?.Version))} · per-player ${esc(one(e => e.ServerPlayerRoundHeader?.Version))}`)}</div>
+  <h2>Records received</h2>${table('recs', [Tx('Record', r => r.k), N('Received', r => r.n), N('Last seen', r => r.t, r => day(r.t)), Tx('Data version', r => Object.keys(r.versions).join(', '))], Object.entries(A.records).map(([k, v]) => ({ k, ...v })), 1)}
+  <h2>Record details</h2><div class="panel">${kv('Build configuration', esc(one('Config')))}${kv('Platform', esc(one('Platform')))}${kv('Change-list number', esc(one('Changelist')))}
+    ${kv('Build number', esc(one('BuildNumber')))}${kv('Micro-patch version', esc(one('Micropatch')))}${kv('Context tags seen', esc(ctx.join(', ') || 'none'))}
+    ${kv('Application id', esc(one('PublicAppID')))}${kv('Header versions', `base ${esc(one('base'))} · player ${esc(one('player'))} · match ${esc(one('match'))} · per-player ${esc(one('perPlayer'))}`)}</div>
   <h2>Things to know</h2><div class="panel"><ul class="plain">
     <li>Match records name the role and the character, never the player. A player is linked to a role only when their own game also reported the match; otherwise the scoreboard says "not reported".</li>
     <li>Records hold no player names. Names shown here come from a separate id to name list. The sign-on session id is used to count play sessions and is never shown.</li>
     <li>Match records come from the host's PC only, so a host could send false numbers. Nothing here cross-checks them yet.</li>
     <li>For Hunters the game counts every damage tick as a hit, so hits can exceed uses and its miss count is unreliable. Monster hits are counted per ability use.</li>
     <li>Records carry no clock time. Dates, queue hours and dome times come from when each record arrived.</li>
-    <li>The game never fills in the Monster's distance travelled: the value seen across all ${num(MATCHES.length)} match records is ${esc(dist)}.</li>
+    <li>The game never fills in the Monster's distance travelled: the value seen across all ${num(ALL.total)} match records is ${esc(dist)}.</li>
     <li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>
     <li>Ranked division boundaries are provisional.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
+    <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
-    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(esc).join(', ') : ''}. Records from any other build are left out${SHOW_ALL ? ' (this local preview shows everything)' : `; ${num(LEFT_OUT)} left out of what is loaded now`}.</li>
+    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(esc).join(', ') : ''}. Records from any other build are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far` : ' (this local preview shows everything)'}.</li>
     <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
-  <h2>Loaded right now</h2>${tiles(tile('Records', num(EVENTS.length)), tile('Matches', num(MATCHES.length)), tile('Players', num(Object.keys(PX).length)), tile('Source', window.TELEMETRY_SAMPLE ? 'Sample' : 'Live'), tile('Covers', EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', 'the server sends a recent window'))}`;
+  <h2>What the site holds</h2>${tiles(tile('Records', num(Object.values(A.records).reduce((a, r) => a + r.n, 0))), tile('Matches', num(ALL.total), 'finished'), tile('Players', num(Object.keys(A.players).length)),
+    tile('Covers', SUM ? `${day_(SUM.from)} to ${day_(SUM.to)}` : EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', SUM ? 'updated ' + stamp(SUM.built) : ''))}`;
 }
 
 /* ---------- router ---------- */
@@ -848,9 +904,7 @@ document.getElementById('nav').addEventListener('click', () => menu(false));
 function render(keepScroll) {
   const [, name = '', arg = ''] = location.hash.split('/');
   if (!keepScroll) menu(false);
-  // with stored totals, these pages still count only the records this page loaded (the most recent ones), and must say so
-  const recentOnly = SUM && ['matchmaking', 'progression', 'store', 'community', 'fairplay'].includes(name);
-  app.innerHTML = (recentOnly ? `<p class="hint">${eye}This page shows recent records only (${EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : 'none loaded right now'}). All-time numbers for it are not built yet.</p>` : '') + (routes[name] || overview)(decodeURIComponent(arg));
+  app.innerHTML = (routes[name] || overview)(decodeURIComponent(arg));
   for (const a of document.querySelectorAll('#nav a')) a.classList.toggle('on', a.dataset.r === (name in parent ? parent[name] : name));
   if (!keepScroll) window.scrollTo(0, 0);
 }
