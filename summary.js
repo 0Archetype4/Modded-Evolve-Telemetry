@@ -3,10 +3,12 @@
    totals for separate groups of matches (one day, one filter combination) can be worked out apart and added up afterwards.
    The exceptions are named here. tools/summarize.js --check proves that adding parts gives the same as counting everything at once. */
 (function (root) {
-  const LATEST = new Set(['level', 'rating']);      // not sums: the newest value wins, decided by the owning player's `t` (time of their newest match)
+  // not sums: the newest value wins, decided by the owning player's `t` (time of their newest match, or of their newest record)
+  const LATEST = new Set(['level', 'rating', 'region', 'cregion', 'lang', 'audio', 'founder', 'bal']);
+  const EARLIEST = new Set(['since']);              // a time: the earlier one wins
   const KEEP = new Set(['levels', 'keys']);         // part of what an entry is (a build's skill points, a combination's perks): identical on both sides
   const CONCAT = new Set(['domes']);                // ponytail: every dome position is kept; bin them into a grid when the list gets heavy
-  const UNION = new Set(['sessions', 'vars']);      // sets of distinct things, stored as lists
+  const UNION = new Set(['sessions', 'vars', 'ids']);      // sets of distinct things, stored as lists
 
   const clone = v => v == null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v));
 
@@ -28,6 +30,7 @@
       for (const k of Object.keys(b)) {
         if (k === 't') a.t = Math.max(a.t || 0, b.t || 0);
         else if (LATEST.has(k)) a[k] = bNewer ? (b[k] ?? a[k]) : (a[k] ?? b[k]);
+        else if (EARLIEST.has(k)) a[k] = Math.min(a[k] ?? Infinity, b[k] ?? Infinity);
         else a[k] = k in a ? add(a[k], b[k], k, bNewer) : clone(b[k]);
       }
       return a;
@@ -36,16 +39,24 @@
   }
   const merge = parts => parts.reduce((acc, p) => add(acc, p, '', false), null);
 
-  // compute()'s result as plain data: sets become lists, and the match objects themselves are left out (kept as a count, and
-  // per player as the time of their newest match, which is what "newest value wins" goes by).
+  // compute()'s or account()'s result as plain data: sets become lists, and the match objects themselves are left out (kept as a
+  // count, and per player as the time of their newest match, which is what "newest value wins" goes by).
   function plain(S) {
     // (a Set made inside the job's sandbox is not an "instanceof Set" out here, so sets are recognised by their tag)
     const out = JSON.parse(JSON.stringify(S, (k, v) => k === 'matches' ? undefined : Object.prototype.toString.call(v) === '[object Set]' ? [...v] : v));
+    if (!S.matches) return out;      // account(): its players carry their own `t`
     out.total = S.matches.length;
     for (const [id, p] of Object.entries(S.players || {})) out.players[id].t = Math.max(0, ...(p.matches || []).map(x => x.m.t));
     return out;
   }
 
-  const api = { add, merge, plain };
+  // Players by Silver Key balance, in steps of 1,000 (the last step is 10,000 and up). Balances themselves are never published.
+  function keyHist(players) {
+    const kb = Array(11).fill(0);
+    for (const p of Object.values(players)) if (p.bal != null) kb[Math.min(10, Math.floor(p.bal / 1000))]++;
+    return kb;
+  }
+
+  const api = { add, merge, plain, keyHist };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.SUMMARY = api;
 })(typeof window !== 'undefined' ? window : globalThis);
