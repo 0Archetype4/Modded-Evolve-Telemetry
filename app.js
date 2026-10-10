@@ -612,11 +612,18 @@ function slots(p, stages) {
 /* Every finished match has a small file of its own records, and every day a list of its matches (tools/summarize.js writes them
    from the archive). So any match ever played can be opened, not only the recent ones this page loaded. */
 const SITE_DATA = window.TELEMETRY_SITE_DATA || 'archive/site';
-const FETCHED = {};      // address -> 'loading' | 'missing' | what came back
-function fetchOnce(url, use) {
-  if (FETCHED[url]) return FETCHED[url];
-  FETCHED[url] = 'loading';
-  fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => { FETCHED[url] = use ? use(d) || d : d; }).catch(() => { FETCHED[url] = 'missing'; }).finally(() => render(true));
+// The files are small scripts that hand their data to TELEMETRY_LOADED(key, data): a script tag may load from the asset
+// bucket's address, where a plain fetch from this page would be refused by the browser.
+const FETCHED = {}, ARRIVED = {};      // key -> 'loading' | 'missing' | what came back
+window.TELEMETRY_LOADED = (key, data) => { ARRIVED[key] = data; };
+function fetchOnce(key, url, use) {
+  if (FETCHED[key]) return FETCHED[key];
+  FETCHED[key] = 'loading';
+  const s = document.createElement('script');
+  s.src = url;
+  s.onload = () => { const d = ARRIVED[key]; delete ARRIVED[key]; FETCHED[key] = d === undefined ? 'missing' : (use && use(d)) || d; render(true); };
+  s.onerror = () => { FETCHED[key] = 'missing'; render(true); };
+  document.head.appendChild(s);
   return 'loading';
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
@@ -626,7 +633,7 @@ function matches() {
   const days = SUM?.dayList ? [...SUM.dayList].reverse() : [];
   if (!days.length) return `<h1>Matches</h1>${filterBar()}${table('mlist', [Tx('Match', m => m.t, m => matchRow(m))], S.matches, 0, 200)}`;
   const day = days.some(d => d.day === ST.browse.day) ? ST.browse.day : days[0].day;
-  const got = fetchOnce(`${SITE_DATA}/days/${day}.json?t=${Math.floor(Date.now() / 600000)}`);
+  const got = fetchOnce('days/' + day, `${SITE_DATA}/days/${day}.js?t=${Math.floor(Date.now() / 600000)}`);
   const pick = `<div class="filters"><label>Day ${select('browse.day', days.map(d => [d.day, `${day_(d.day)} · ${num(d.matches)} matches`]), day)}</label></div>`;
   if (got === 'loading') return `<h1>Matches</h1>${filterBar()}${pick}<p class="dim">Loading the list for ${day_(day)}…</p>`;
   if (got === 'missing') return `<h1>Matches</h1>${filterBar()}${pick}<p class="dim">The list for ${day_(day)} could not be loaded.</p>`;
@@ -645,7 +652,7 @@ const day_ = d => day(Date.parse(d + 'T00:00:00Z'));
 function match(id) {
   let m = MATCH.get(id);
   if (!m && SUM) {        // not among the loaded recent records: fetch this match's own file
-    const got = fetchOnce(`${SITE_DATA}/m/${id.slice(-2)}/${encodeURIComponent(id)}.json?d=${utcDay()}`, recs => { for (const e of recs) ingest(e, false); const r = byId.get(id); if (r?.round) MATCH.set(id, toMatch(r)); });
+    const got = fetchOnce('m/' + id, `${SITE_DATA}/m/${id.slice(-2)}/${encodeURIComponent(id)}.js?d=${utcDay()}`, recs => { for (const e of recs) ingest(e, false); const r = byId.get(id); if (r?.round) MATCH.set(id, toMatch(r)); });
     if (got === 'loading') return `<h1>Loading this match…</h1>`;
     m = MATCH.get(id);
   }
