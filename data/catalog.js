@@ -1814,8 +1814,8 @@ window.CATALOG = {
   {
    "name": "Bronze Expert",
    "tier": "bronze",
-   "min": null,
-   "max": null,
+   "min": 450,
+   "max": 825,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzeexpert.png"
   },
   {
@@ -1877,8 +1877,8 @@ window.CATALOG = {
   {
    "name": "Gold Skilled",
    "tier": "gold",
-   "min": null,
-   "max": null,
+   "min": 2100,
+   "max": 2220,
    "icon": "https://assets.modded-evolve.com/images/ranks/goldskilled.png"
   },
   {
@@ -1898,15 +1898,15 @@ window.CATALOG = {
   {
    "name": "Gold Elite",
    "tier": "gold",
-   "min": null,
-   "max": null,
+   "min": 2400,
+   "max": 2460,
    "icon": "https://assets.modded-evolve.com/images/ranks/goldelite.png"
   },
   {
    "name": "Gold Destroyer",
    "tier": "gold",
-   "min": null,
-   "max": null,
+   "min": 2460,
+   "max": 4000,
    "icon": "https://assets.modded-evolve.com/images/ranks/golddestroyer.png"
   }
  ],
