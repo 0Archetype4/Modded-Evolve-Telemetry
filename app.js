@@ -1,7 +1,8 @@
 'use strict';
 /* Modded Evolve Telemetry: joins the game's raw telemetry records into matches and draws every page.
    COVERAGE.md lists where each recorded field ends up. Site text says "match"; the game's own field names say "Round". */
-const C = window.CATALOG, NAMES = window.TELEMETRY_PLAYERS || {};
+// display names: those that came with the stored totals, then those of the players in the loaded recent records
+const C = window.CATALOG, NAMES = { ...(window.TELEMETRY_SUMMARY?.names || {}), ...(window.TELEMETRY_PLAYERS || {}) };
 // Owner's rule (2026-10-09): only matches played on an OFFICIAL public release count. Each record names the release it was played on
 // (BaseHeader.Context, set by the launcher only when the player's game files are exactly that release). Everything else is left out:
 // older public builds, betas and drafts, files that match no release, and Turtle Rock's own test tag ("aisoak").
@@ -113,12 +114,15 @@ function learnItems(e) {
 }
 const KIND = { ClientLoginRecord: 'login', ClientMatchmakingRecord: 'mm', ClientXPRecord: 'xp', ClientRewardRecord: 'reward', ClientChallengeUpdateRecord: 'chall',
   ClientPurchaseRecord: 'purchase', ClientProfilingRecord: 'profiling', ServerEACClientKickRecord: 'kick' };
-for (const e of EVENTS) {
-  const c = cell(COUNTS, e.EventName, () => ({ n: 0, last: 0, versions: new Set() }));
-  c.n++; c.last = Math.max(c.last, T(e)); c.versions.add(e.Data?.Version);
-  if (KIND[e.EventName]) REC[KIND[e.EventName]].push(e);
+// Put one record where the pages look for it. counted = false for a match fetched on demand (an older match opened by its id):
+// it must not change the "records loaded" counts or the recent-records pages.
+function ingest(e, counted = true) {
+  if (counted) { const c = cell(COUNTS, e.EventName, () => ({ n: 0, last: 0, versions: new Set() }));
+    c.n++; c.last = Math.max(c.last, T(e)); c.versions.add(e.Data?.Version);
+    if (KIND[e.EventName]) REC[KIND[e.EventName]].push(e); }
   const ch = e.ClientHeader;
   if (ch) {       // records arrive oldest first, so the last one seen wins
+    if (!counted) { if (e.EventName === 'ClientRoundRecord') slot(String(e.Data.RoundID)).clients[e.Data.CharacterClass] = e; return; }
     const p = px(ch.My2kID);
     p.first = Math.min(p.first, T(e)); p.last = Math.max(p.last, T(e));
     p.region = ch.OnlineRegion; p.cregion = ch.ClassificationRegion; p.lang = ch.Language; p.audio = ch.LanguageAudio; p.isNew = p.isNew || ch.FirstTimeUser;
@@ -128,10 +132,10 @@ for (const e of EVENTS) {
     for (const r of e.Data.Rewards || []) p.rewards.push({ t: T(e), why: e.Data.Source || (e.EventName === 'ClientXPRecord' ? 'Level up' : 'Challenge'), ...r });
     if (e.EventName === 'ClientRoundRecord') slot(String(e.Data.RoundID)).clients[e.Data.CharacterClass] = e;
     if (e.EventName === 'ClientMatchmakingRecord' && +e.Data.GameSessionId) slot(String(e.Data.GameSessionId)).mm.push(e);
-    continue;
+    return;
   }
   const h = e.ServerRoundHeader;
-  if (!h) continue;
+  if (!h) return;
   const r = slot(String(h.RoundID));
   if (e.EventName === 'ServerRoundRecord') r.round = e;
   else if (e.EventName === 'ServerRoundStartRecord') r.start = e;
@@ -140,11 +144,11 @@ for (const e of EVENTS) {
   else if (e.EventName === 'ServerEACClientKickRecord') r.kicks.push(e);
   else if (e.ServerPlayerRoundHeader) { r.players[e.ServerPlayerRoundHeader.Class] = e; learnItems(e); }
 }
-const MATCHES = [...byId.values()].filter(r => r.round).map(r => {
-  const hdr = r.round.ServerRoundHeader;
+for (const e of EVENTS) ingest(e);
+const toMatch = r => { const hdr = r.round.ServerRoundHeader;
   return { ...r, hdr, d: r.round.Data, dur: r.round.BaseHeader.Duration, t: T(r.round), v: ver(r.round), mapKey: hdr.Map + (hdr.MapLayer ? '|' + hdr.MapLayer : ''),
-    decided: hdr.WinningTeam === 'Merc' || hdr.WinningTeam === 'Monster', hunterWin: hdr.WinningTeam === 'Merc' };
-}).sort((a, b) => b.t - a.t);
+    decided: hdr.WinningTeam === 'Merc' || hdr.WinningTeam === 'Monster', hunterWin: hdr.WinningTeam === 'Merc' }; };
+const MATCHES = [...byId.values()].filter(r => r.round).map(toMatch).sort((a, b) => b.t - a.t);
 const UNFINISHED = [...byId.values()].filter(r => r.start && !r.round);
 const MATCH = new Map(MATCHES.map(m => [m.id, m]));
 const won = (m, role) => m.decided ? (role === 'Monster') !== m.hunterWin : null;
@@ -160,7 +164,7 @@ const sliceKeys = SUM ? Object.keys(SUM.slices) : [];
 const optionsOf = (i, f) => SUM ? [...new Set(sliceKeys.map(k => k.split('|')[i]))].sort() : uniq(f);
 // solo matches are left out by default, unless they are all there is
 const ST = { fl: { v: '', mode: '', type: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
-  players: { q: '', region: '' }, dlg: { speaker: '' }, prog: { track: 'Global' } };
+  players: { q: '', region: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
 const passes = m => (!ST.fl.v || m.v === ST.fl.v) && (!ST.fl.mode || m.hdr.GameMode === ST.fl.mode) && (!ST.fl.type || m.hdr.MatchType === ST.fl.type) && (ST.fl.solo || m.hdr.Multiplayer);
 const uniq = f => [...new Set(MATCHES.map(f))].sort();
 const select = (path, opts, cur, all) => `<select data-st="${path}">${all ? `<option value="">${all}</option>` : ''}${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o];
@@ -350,7 +354,7 @@ function heat(mapKey, domes, view = 'all', numbered = false) {
 /* ---------- pages ---------- */
 const SECTIONS = [['characters', 'Characters', 'Who gets picked and who wins'], ['matchups', 'Matchups', 'Who wins versus who'], ['perks', 'Perks', 'Which perks are picked the most, and which are not'],
   ['maps', 'Maps', 'Which side wins on each map, and where the fights happen'], ['ranked', 'Ranked', 'The ranked leaderboard'], ['players', 'Players', 'Look up any player'],
-  ['matchmaking', 'Matchmaking', 'How long queues take and how even matches are'], ['progression', 'Progression', 'XP, levels, keys and challenges'], ['store', 'Store', 'What gets bought'],
+  ['matches', 'Matches', 'Every match played, day by day'], ['matchmaking', 'Matchmaking', 'How long queues take and how even matches are'], ['progression', 'Progression', 'XP, levels, keys and challenges'], ['store', 'Store', 'What gets bought'],
   ['dialogue', 'Dialogue', 'Which voice lines play the most'], ['community', 'Community', 'Who is playing, where and when'], ['fairplay', 'Fair play', 'Leavers, dodgers and kicks'],
   ['about', 'About the data', 'Where the numbers come from']];
 document.getElementById('nav').innerHTML = `<a href="#/" data-r="">Overview</a>` + SECTIONS.map(s => `<a href="#/${s[0]}" data-r="${s[0]}">${s[1]}</a>`).join('');
@@ -546,13 +550,14 @@ function players() {
 }
 
 function player(id) {
-  const p = ALL.players[id], x = PX[id];
-  if (!p || !x) return `<h1>Player not found</h1><p class="sub">No matches reported under this id.</p>`;
+  // p: their match totals. x: account details (region, language, sign-ins, XP, rewards), which exist only in the loaded recent records
+  const p = ALL.players[id], known = PX[id], x = known || { first: NaN, last: NaN, founder: null, region: '', cregion: '', lang: '', audio: '', isNew: false, logins: 0, mm: [], xp: [], rewards: [], chall: [] };
+  if (!p) return `<h1>Player not found</h1><p class="sub">No matches reported under this id.</p>`;
   const gains = x.xp.filter(e => e.Data.Category === 'Global').slice(-30), queues = x.mm.filter(e => +e.Data.GameSessionId), left = x.mm.filter(e => !+e.Data.GameSessionId);
   const chal = {}; for (const e of x.chall) chal[e.Data.Name] = e;
   const lad = (l, name) => { const dv = l.n >= 10 ? division(l.rating) : null; return kv(name, l.n ? `${dv ? esc(dv.name) : `In placement (${l.n}/10)`} · rating ${num(l.rating)} · ${l.w}-${l.d - l.w}` : 'No ranked matches'); };
   return `<h1>${esc(pname(id))} ${x.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
-  <p class="sub">${esc(pretty(x.region))} · text ${esc(x.lang)} · audio ${esc(x.audio)} · first seen ${day(x.first)} · last seen ${day(x.last)} · id ${esc(String(id).slice(0, 8))}…</p>
+  <p class="sub">${known ? `${esc(pretty(x.region))} · text ${esc(x.lang)} · audio ${esc(x.audio)} · first seen ${day(x.first)} · last seen ${day(x.last)}` : 'Region, language, queue and progression details come from recent records, and none of this player\'s are loaded right now'} · id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
     tile('Account level', num(p.level)), tile('Time played', hours(p.secs)), tile('Play sessions', p.sessions.size ? num(p.sessions.size) : '–', p.sessions.size ? `${dec(p.n / p.sessions.size)} matches each` : 'not recorded'), tile('Chat', dec(p.chat / p.n), 'messages per match'))}
   <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(p.rk.h, 'Hunter ladder')}${lad(p.rk.m, 'Monster ladder')}</div></section>
@@ -604,8 +609,46 @@ function slots(p, stages) {
     kv('Stage ' + i, heals['Stage' + i].map(h => `${esc(itemInfo(h.Name).name)} ${num(h.HealAmount)}`).join(' · '))).join('')}${kv('Total', num(heals.TotalHeals))}</div>` : '');
 }
 
+/* Every finished match has a small file of its own records, and every day a list of its matches (tools/summarize.js writes them
+   from the archive). So any match ever played can be opened, not only the recent ones this page loaded. */
+const SITE_DATA = window.TELEMETRY_SITE_DATA || 'archive/site';
+const FETCHED = {};      // address -> 'loading' | 'missing' | what came back
+function fetchOnce(url, use) {
+  if (FETCHED[url]) return FETCHED[url];
+  FETCHED[url] = 'loading';
+  fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => { FETCHED[url] = use ? use(d) || d : d; }).catch(() => { FETCHED[url] = 'missing'; }).finally(() => render(true));
+  return 'loading';
+}
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+// Every match, one day at a time. Follows the filter bar like the totals pages do.
+function matches() {
+  const days = SUM?.dayList ? [...SUM.dayList].reverse() : [];
+  if (!days.length) return `<h1>Matches</h1>${filterBar()}${table('mlist', [Tx('Match', m => m.t, m => matchRow(m))], S.matches, 0, 200)}`;
+  const day = days.some(d => d.day === ST.browse.day) ? ST.browse.day : days[0].day;
+  const got = fetchOnce(`${SITE_DATA}/days/${day}.json?t=${Math.floor(Date.now() / 600000)}`);
+  const pick = `<div class="filters"><label>Day ${select('browse.day', days.map(d => [d.day, `${day_(d.day)} · ${num(d.matches)} matches`]), day)}</label></div>`;
+  if (got === 'loading') return `<h1>Matches</h1>${filterBar()}${pick}<p class="dim">Loading the list for ${day_(day)}…</p>`;
+  if (got === 'missing') return `<h1>Matches</h1>${filterBar()}${pick}<p class="dim">The list for ${day_(day)} could not be loaded.</p>`;
+  const rows = got.rows.filter(r => slicePasses([r.v, r.mode, r.type, r.mp ? 0 : 1].join('|')));
+  const faces = (r, roles) => `<span class="comp">${roles.map(role => r.bots.includes(role) ? `<span class="dim" title="${role}: bot">bot</span>` : face(r.c[role])).join('')}</span>`;
+  return `<h1>Matches</h1><p class="sub">Every match played, newest first. Open one for its full scoreboard, weapons, domes and voice lines.</p>${filterBar()}${pick}
+  ${table('mlist', [N('Time (UTC)', r => r.t, r => new Date(r.t).toISOString().slice(11, 16)), Tx('Type', r => typeName(r.type)), Tx('Mode', r => modeName(r.mode)), Tx('Map', r => mapInfo(r.map).name),
+    Tx('Winner', r => r.win, r => r.win === 'Merc' ? '<span class="c-Medic">Hunters</span>' : r.win === 'Monster' ? '<span class="c-Monster">Monster</span>' : '<span class="dim">No result</span>'),
+    N('Length', r => r.dur, r => clock(r.dur)), N('Final stage', r => r.stage), Tx('Monster', r => charInfo(r.c.Monster).name, r => faces(r, ['Monster'])), Tx('Hunters', r => '', r => faces(r, HUNTERS)),
+    N('People', r => 5 - r.bots.length)], rows, 0, ST.browse.all ? 0 : 200, false, r => '#/match/' + encodeURIComponent(r.id))}
+  ${rows.length > 200 && !ST.browse.all ? `<p><button data-st="browse.all" data-v="1">Show all ${num(rows.length)} matches of this day</button></p>` : ''}
+  <p class="note">${num(rows.length)} of this day's ${num(got.rows.length)} matches pass the filters above. The day is the UTC day the match's result reached the server.</p>`;
+}
+const day_ = d => day(Date.parse(d + 'T00:00:00Z'));
+
 function match(id) {
-  const m = MATCH.get(id);
+  let m = MATCH.get(id);
+  if (!m && SUM) {        // not among the loaded recent records: fetch this match's own file
+    const got = fetchOnce(`${SITE_DATA}/m/${id.slice(-2)}/${encodeURIComponent(id)}.json?d=${utcDay()}`, recs => { for (const e of recs) ingest(e, false); const r = byId.get(id); if (r?.round) MATCH.set(id, toMatch(r)); });
+    if (got === 'loading') return `<h1>Loading this match…</h1>`;
+    m = MATCH.get(id);
+  }
   if (!m) return `<h1>Match not found</h1>`;
   const d = m.d, H = d.Hunters || {}, mon = d.Monster || {}, incaps = r => (H.Incaps?.Class || []).filter(c => c === r).length, t0 = m.t - m.dur * 1000;
   const rows = ROLES.map(role => ({ role, p: m.players[role], ph: m.players[role]?.ServerPlayerRoundHeader || {}, id: m.hdr.CharacterId[role], cd: m.clients[role]?.Data, who: pid(m, role) }));
@@ -789,8 +832,8 @@ function about() {
 }
 
 /* ---------- router ---------- */
-const routes = { '': overview, characters, character, matchups, perks, maps, ranked, players, player, match, matchmaking, progression, store, dialogue, community, fairplay, about };
-const parent = { character: 'characters', player: 'players', match: null };
+const routes = { '': overview, characters, character, matchups, perks, maps, ranked, players, player, matches, match, matchmaking, progression, store, dialogue, community, fairplay, about };
+const parent = { character: 'characters', player: 'players', match: 'matches' };
 const header = document.querySelector('.top'), menuBtn = document.getElementById('menuBtn');   // the phone menu
 const menu = open => { header.classList.toggle('open', open); menuBtn.setAttribute('aria-expanded', open); menuBtn.textContent = open ? 'Close' : 'Menu'; };
 menuBtn.addEventListener('click', () => menu(!header.classList.contains('open')));
@@ -799,7 +842,7 @@ function render(keepScroll) {
   const [, name = '', arg = ''] = location.hash.split('/');
   if (!keepScroll) menu(false);
   // with stored totals, these pages still count only the records this page loaded (the most recent ones), and must say so
-  const recentOnly = SUM && ['matchmaking', 'progression', 'store', 'community', 'fairplay', 'match'].includes(name);
+  const recentOnly = SUM && ['matchmaking', 'progression', 'store', 'community', 'fairplay'].includes(name);
   app.innerHTML = (recentOnly ? `<p class="hint">${eye}This page shows recent records only (${EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : 'none loaded right now'}). All-time numbers for it are not built yet.</p>` : '') + (routes[name] || overview)(decodeURIComponent(arg));
   for (const a of document.querySelectorAll('#nav a')) a.classList.toggle('on', a.dataset.r === (name in parent ? parent[name] : name));
   if (!keepScroll) window.scrollTo(0, 0);
