@@ -1821,8 +1821,8 @@ window.CATALOG = {
   {
    "name": "Bronze Master",
    "tier": "bronze",
-   "min": null,
-   "max": null,
+   "min": 825,
+   "max": 1125,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzemaster.png"
   },
   {
@@ -1863,15 +1863,15 @@ window.CATALOG = {
   {
    "name": "Silver Elite",
    "tier": "silver",
-   "min": null,
-   "max": null,
+   "min": 1950,
+   "max": 2040,
    "icon": "https://assets.modded-evolve.com/images/ranks/silverelite.png"
   },
   {
    "name": "Silver Destroyer",
    "tier": "silver",
-   "min": null,
-   "max": null,
+   "min": 2040,
+   "max": 2100,
    "icon": "https://assets.modded-evolve.com/images/ranks/silverdestroyer.png"
   },
   {
