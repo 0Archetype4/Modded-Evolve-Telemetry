@@ -190,8 +190,8 @@ function compute(matches) {
     S.leaverMatches += sumv(d.LeaverCounts) ? 1 : 0; S.late += sumv(d.LateJoinerCounts);
     const dl = m.dialogue?.Data;
     if (dl) { S.lineSecs += m.dialogue.BaseHeader.Duration;
-      (dl.Responses || []).forEach((resp, i) => { const sp = dl.Speakers[i], ln = cell(S.lines, sp + '|' + resp, () => ({ speaker: sp, response: resp, event: dl.EventNames[i], vars: new Set(), n: 0 }));
-        ln.n++; ln.vars.add(dl.Variations?.[i]); cell(S.triggers, dl.EventNames[i], () => ({ n: 0 })).n++; S.lineCount++; }); }
+      (dl.Responses || []).forEach((resp, i) => { const sp = dl.Speakers[i], ln = cell(S.lines, sp + '|' + resp, () => ({ speaker: sp, response: resp, events: {}, vars: new Set(), n: 0 }));
+        ln.n++; ln.vars.add(dl.Variations?.[i]); ln.events[dl.EventNames[i]] = (ln.events[dl.EventNames[i]] || 0) + 1;   /* a line can have more than one trigger: count each */ cell(S.triggers, dl.EventNames[i], () => ({ n: 0 })).n++; S.lineCount++; }); }
 
     const seen = new Set();          // perks and sides already counted for this match, so a match counts once however many players brought the perk
     for (const role of ROLES) {
@@ -252,7 +252,8 @@ function compute(matches) {
           for (let i = 1; i <= 3; i++) for (const h of s['Stage' + i] || []) { src('Healing', h.Name, i, h.HealAmount); cs.st[i].heal += h.HealAmount; } continue; }
         if (!s.TotalDamageDealt && s.TotalDamageDealt !== 0) continue;
         const flat = typeof s.TotalDamageDealt === 'number';                // "other" damage is one number, not a Hunters / wildlife pair
-        const it = cell(cs.items, label, () => ({ label, key: s.Name ?? label, n: 0, uses: 0, hits: 0, hitsWl: 0, miss: 0, dmg: 0, dmgWl: 0 })), a = s.Aggregate;
+        // one entry per slot AND item name: the same slot can hold different items in different matches (a patch can swap a weapon)
+        const it = cell(cs.items, label + '|' + (s.Name ?? label), () => ({ label, key: s.Name ?? label, n: 0, uses: 0, hits: 0, hitsWl: 0, miss: 0, dmg: 0, dmgWl: 0 })), a = s.Aggregate;
         it.n++; it.dmg += flat ? s.TotalDamageDealt : s.TotalDamageDealt.OpposingTeam || 0; it.dmgWl += flat ? 0 : s.TotalDamageDealt.Wildlife || 0;
         if (a) { it.uses += a.Uses || 0; it.hits += a.Hits?.OpposingTeam || 0; it.hitsWl += a.Hits?.Wildlife || 0; it.miss += a.Misses > 2e9 ? 0 : a.Misses || 0; }   // the game's Hunter miss count can wrap around
         for (let i = 1; i <= 3; i++) { const g = s['Stage' + i]; if (!g) continue;
@@ -294,6 +295,8 @@ function table(id, cols, rows, def = 0, limit = 0, asc = false, href = null) {
 const N = (h, v, r) => ({ h, v, r: r || (x => num(v(x))), n: 1 });
 const P = (h, v) => N(h, v, x => fpct(v(x)));
 const Tx = (h, v, r) => ({ h, v, r });
+// what usually sets a voice line off: its most common trigger (ties go to the first in A to Z order), with a count of the others
+const trigger = l => { const e = Object.entries(l.events || {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); return e.length ? e[0][0] + (e.length > 1 ? ` (+${e.length - 1} more)` : '') : '–'; };
 const LV = N('Avg level', p => avg(p.lv, p.lvN), p => dec(avg(p.lv, p.lvN)));      // a perk row's average recorded level, 1 to 3
 const count = (list, key) => { const o = {}; for (const x of list) { const k = key(x); if (k != null) o[k] = (o[k] || 0) + 1; } return Object.entries(o).map(([k, n]) => ({ k, n })); };
 
@@ -355,7 +358,9 @@ function character(id) {
   if (!c) return `<h1>${esc(info.name)}</h1>${filterBar()}<p class="sub">No matches recorded for this character with these filters.</p>`;
   const mon = c.role === 'Monster', items = Object.values(c.items).map(it => ({ ...it, info: itemInfo(it.key) })), total = items.reduce((a, it) => a + it.dmg, 0);
   const lines = Object.values(S.lines).filter(l => l.speaker === id);
-  const abil = [1, 2, 3, 4].map(j => c.items['Ability' + j] ? itemInfo(c.items['Ability' + j].key) : { name: 'Ability ' + j, icon: '' });   // the four ability slots, for the skill-point tables
+  // the four ability slots, for the skill-point tables: the item most often seen in each slot
+  const inSlot = j => Object.values(c.items).filter(it => it.label === 'Ability' + j).sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))[0];
+  const abil = [1, 2, 3, 4].map(j => inSlot(j) ? itemInfo(inSlot(j).key) : { name: 'Ability ' + j, icon: '' });
   // a ranked list of the four abilities, most points first: points invested in each and its share of all points in the list
   const ranked = (title, matches, points) => { const total = points.reduce((a, b) => a + b, 0);
     return `<div class="build"><div class="bh"><b>${title}</b><span>${plural(total, 'point', 'points')} in ${plural(matches, 'match', 'matches')}</span></div>${abil.map((a, j) => ({ a, v: points[j] })).sort((x, y) => y.v - x.v).map((x, i) =>
@@ -402,7 +407,7 @@ function character(id) {
     <section><h2>Perk combinations</h2>${table('cc-' + id, [Tx('Perks', x => x.keys.join(), x => perkIcons(x.keys) + ' <span class="dim">' + x.keys.map(k => esc(perkInfo(k).name)).join(', ') + '</span>'), N('Matches', x => x.n), P('Win rate', x => pct(x.w, x.d))], Object.values(c.combos), 1, 8)}</section>
     <section><h2>Skins used</h2>${table('skin-' + id, [Tx('Skin', s => s.k), N('Matches', s => s.n), N('Share', s => pct(s.n, sumv(c.skins)), s => bar(pct(s.n, sumv(c.skins))))], Object.entries(c.skins).map(([k, n]) => ({ k, n })), 1)}</section>
   </div>
-  ${lines.length ? `<h2>Most-heard voice lines</h2>${table('cl-' + id, [Tx('Line', l => l.response), Tx('Triggered by', l => l.event), N('Times played', l => l.n), Tx('', l => '', l => play(lineUrl(l.speaker, l.response)))], lines, 2, 10)}` : ''}
+  ${lines.length ? `<h2>Most-heard voice lines</h2>${table('cl-' + id, [Tx('Line', l => l.response), Tx('Triggered by', trigger), N('Times played', l => l.n), Tx('', l => '', l => play(lineUrl(l.speaker, l.response)))], lines, 2, 10)}` : ''}
   <h2>Most matches on ${esc(info.name)}</h2>${table('cpl-' + id, [Tx('Player', p => pname(p.id), p => plink(p.id)), N('Matches', p => p.n), P('Win rate', p => pct(p.w, p.d)),
     N('Level', p => ALL.players[p.id]?.chars[id]?.level)], Object.entries(c.players).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, p => playerHref(p.id))}`;
 }
@@ -695,7 +700,7 @@ function dialogue() {
   return `<h1>Dialogue</h1><p class="sub">Every voice line the game chose to play, with how often. Play uses the audio already on the Stage 2 website where a file with that name exists.</p>
   <div class="filters"><label>Speaker ${select('dlg.speaker', speakers.map(s => [s, charInfo(s).name]), ST.dlg.speaker, 'Everyone')}</label></div>
   ${tiles(tile('Lines played', num(ALL.lineCount)), tile('Lines per minute', dec(ALL.lineCount / (ALL.lineSecs / 60 || 1))), tile('Distinct lines', num(Object.keys(ALL.lines).length)), tile('Speakers', num(speakers.length)))}
-  <h2>Lines</h2>${table('lines', [Tx('Line', l => l.response), Tx('Triggered by', l => l.event), Tx('Speaker', l => charInfo(l.speaker).name, l => chip(l.speaker)),
+  <h2>Lines</h2>${table('lines', [Tx('Line', l => l.response), Tx('Triggered by', trigger), Tx('Speaker', l => charInfo(l.speaker).name, l => chip(l.speaker)),
     Tx('Variations heard', l => [...l.vars].sort().join(', ')), N('Times played', l => l.n), Tx('', l => '', l => play(lineUrl(l.speaker, l.response)))], lines, 4, 60)}
   <h2>What triggers dialogue</h2>${table('trig', [Tx('Trigger', t => t.k), N('Times', t => t.n), N('Share', t => pct(t.n, ALL.lineCount), t => bar(pct(t.n, ALL.lineCount)))], Object.entries(ALL.triggers).map(([k, v]) => ({ k, n: v.n })), 1, 25)}`;
 }
