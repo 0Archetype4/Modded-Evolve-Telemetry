@@ -212,19 +212,15 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
 
 <script src="data/catalog.js?v=869b2e5b8af1"></script>
 
-<script src="summary.js?v=706c0cd3cf31"></script>
+<script src="summary.js?v=96fce95599e0"></script>
 
 <script>
 (function () {
-  window.TELEMETRY_SITE_DATA = "https://assets.modded-evolve.com/telemetry/site";      // one file per match and one list per day, fetched only when opened
-  var left = 2, done = function () { if (--left) return; var s = document.createElement('script'); s.src = "app.js?v=05a66187e647"; document.body.appendChild(s); };
-  // all-time totals: a file in the asset bucket, replaced when the totals are rebuilt (asked for afresh every ten minutes)
-  var t = document.createElement('script'); t.src = "https://assets.modded-evolve.com/telemetry/totals.js" + '?t=' + Math.floor(Date.now() / 600000); t.onload = t.onerror = done; document.head.appendChild(t);
-  // recent records: the backend's feed
-  fetch("https://social.modded-evolve.com/social/stage2/test/telemetry-v1/feed").then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(function (d) { window.TELEMETRY_PLAYERS = d.players || {}; window.TELEMETRY_EVENTS = d.events || []; })
-    .catch(function () { window.TELEMETRY_EVENTS = []; window.TELEMETRY_FEED_ERROR = true; })
-    .finally(done);
+  window.TELEMETRY_SITE_DATA = "https://assets.modded-evolve.com/telemetry/site";      // a file per match and per player and a list per day, fetched only when opened
+  // all-time totals: a file in the asset bucket, replaced each time the NAS recounts (asked for afresh every ten minutes)
+  var t = document.createElement('script'); t.src = "https://assets.modded-evolve.com/telemetry/totals.js" + '?t=' + Math.floor(Date.now() / 600000);
+  t.onload = t.onerror = function () { var s = document.createElement('script'); s.src = "app.js?v=26e4ac525e80"; document.body.appendChild(s); };
+  document.head.appendChild(t);
 })();
 </script>
 </body>
