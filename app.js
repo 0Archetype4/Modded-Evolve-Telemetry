@@ -17,9 +17,11 @@ const LEFT_OUT = RAW.length - EVENTS.length;
 const ROLES = ['Assault', 'Trapper', 'Medic', 'Support', 'Monster'], HUNTERS = ROLES.slice(0, 4);
 const app = document.getElementById('app');
 const banner = document.getElementById('sample');
-if (window.TELEMETRY_FEED_ERROR) banner.textContent = 'The match data could not be loaded right now. Refresh in a minute.';     // never show an empty site as if it were the truth
-else if (!EVENTS.length) banner.textContent = 'No matches have been recorded yet. This site fills in as matches are played.';
-banner.hidden = !window.TELEMETRY_SAMPLE && !window.TELEMETRY_FEED_ERROR && EVENTS.length > 0;
+const HAS_TOTALS = !!(window.TELEMETRY_SUMMARY && window.SUMMARY);       // stored all-time totals are loaded
+// never show an empty site as if it were the truth
+if (window.TELEMETRY_FEED_ERROR) banner.textContent = HAS_TOTALS ? 'Recent matches could not be loaded right now. The all-time totals are still shown.' : 'The match data could not be loaded right now. Refresh in a minute.';
+else if (!EVENTS.length && !HAS_TOTALS) banner.textContent = 'No matches have been recorded yet. This site fills in as matches are played.';
+banner.hidden = !window.TELEMETRY_SAMPLE && !window.TELEMETRY_FEED_ERROR && (EVENTS.length > 0 || HAS_TOTALS);
 
 /* ---------- small helpers ---------- */
 // every string that comes out of a record or a player name goes through esc(): records are sent by players' own PCs
@@ -39,7 +41,9 @@ const nw = () => ({ n: 0, w: 0, d: 0 });
 const T = e => e._t ?? (e._t = Date.parse(e._received));
 // The dates the loaded records span. Shown beside every total, because the server only sends a recent window: without this a shorter window would shrink the numbers unseen.
 const SPAN = () => SPAN.v || (SPAN.v = EVENTS.reduce((a, e) => [Math.min(a[0], T(e)), Math.max(a[1], T(e))], [Infinity, 0]));
-const covers = () => EVENTS.length ? `records from ${day(SPAN()[0])} to ${day(SPAN()[1])}` : 'no records yet';
+const stamp = iso => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+const covers = () => window.TELEMETRY_SUMMARY && window.SUMMARY ? `every match from ${day(Date.parse(window.TELEMETRY_SUMMARY.from))} to ${day(Date.parse(window.TELEMETRY_SUMMARY.to))} · totals updated ${stamp(window.TELEMETRY_SUMMARY.built)}`
+  : EVENTS.length ? `records from ${day(SPAN()[0])} to ${day(SPAN()[1])}` : 'no records yet';
 // which play session a record belongs to: the launcher blanks the sign-on session id and leaves a short hash of it in _session
 const sessionOf = e => e._session || e.ClientHeader?.SSOSessionID || '';
 const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
@@ -148,16 +152,22 @@ const pid = (m, role) => m.clients[role]?.ClientHeader?.My2kID || null;
 const isRanked = m => String(m.hdr.MatchType).startsWith('Ranked');
 
 /* ---------- page state and filters ---------- */
+/* Stored totals (data/totals.js, written by tools/summarize.js from the archive of every record) cover every match since launch,
+   split into the smallest groups the filters can tell apart: "patch|mode|match type|solo". With them, the numbers on the totals
+   pages are those groups added together (summary.js), and the records this page loaded only supply recent matches for the lists. */
+const SUM = window.TELEMETRY_SUMMARY && window.SUMMARY ? window.TELEMETRY_SUMMARY : null;
+const sliceKeys = SUM ? Object.keys(SUM.slices) : [];
+const optionsOf = (i, f) => SUM ? [...new Set(sliceKeys.map(k => k.split('|')[i]))].sort() : uniq(f);
 // solo matches are left out by default, unless they are all there is
-const ST = { fl: { v: '', mode: '', type: '', solo: MATCHES.some(m => m.hdr.Multiplayer) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
+const ST = { fl: { v: '', mode: '', type: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
   players: { q: '', region: '' }, dlg: { speaker: '' }, prog: { track: 'Global' } };
 const passes = m => (!ST.fl.v || m.v === ST.fl.v) && (!ST.fl.mode || m.hdr.GameMode === ST.fl.mode) && (!ST.fl.type || m.hdr.MatchType === ST.fl.type) && (ST.fl.solo || m.hdr.Multiplayer);
 const uniq = f => [...new Set(MATCHES.map(f))].sort();
 const select = (path, opts, cur, all) => `<select data-st="${path}">${all ? `<option value="">${all}</option>` : ''}${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o];
   return `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`;
-const filterBar = () => `<div class="filters"><label>Patch ${select('fl.v', uniq(m => m.v), ST.fl.v, 'All patches')}</label>
-  <label>Mode ${select('fl.mode', uniq(m => m.hdr.GameMode).map(g => [g, modeName(g)]), ST.fl.mode, 'All modes')}</label><label>Match type ${select('fl.type', uniq(m => m.hdr.MatchType).sort((a, b) => Object.keys(TYPES).indexOf(a) - Object.keys(TYPES).indexOf(b)).map(t => [t, typeName(t)]), ST.fl.type, 'All types')}</label>
-  <label>Solo matches ${select('fl.solo', [['', 'Left out'], ['1', 'Included']], ST.fl.solo)}</label><span class="dim">${num(S.matches.length)} matches · ${covers()}</span></div>`;
+const filterBar = () => `<div class="filters"><label>Patch ${select('fl.v', optionsOf(0, m => m.v), ST.fl.v, 'All patches')}</label>
+  <label>Mode ${select('fl.mode', optionsOf(1, m => m.hdr.GameMode).map(g => [g, modeName(g)]), ST.fl.mode, 'All modes')}</label><label>Match type ${select('fl.type', optionsOf(2, m => m.hdr.MatchType).sort((a, b) => Object.keys(TYPES).indexOf(a) - Object.keys(TYPES).indexOf(b)).map(t => [t, typeName(t)]), ST.fl.type, 'All types')}</label>
+  <label>Solo matches ${select('fl.solo', [['', 'Left out'], ['1', 'Included']], ST.fl.solo)}</label><span class="dim">${num(S.total)} matches · ${covers()}</span></div>`;
 const tabs = (path, opts, cur) => `<div class="tabs">${opts.map(o => { const [v, l, off] = Array.isArray(o) ? o : [o, o];
   return `<button data-st="${path}" data-v="${esc(v)}" class="${v === cur ? 'on' : ''}"${off ? ' disabled' : ''}>${l}</button>`; }).join('')}</div>`;
 
@@ -165,7 +175,7 @@ const tabs = (path, opts, cur) => `<div class="tabs">${opts.map(o => { const [v,
    ponytail: all of this runs in the browser on every load and every filter change. Fine for a few thousand matches;
    when the file gets heavy, do this join in the collector and ship the totals instead. */
 function compute(matches) {
-  const S = { matches, chars: {}, perks: {}, combos: {}, maps: {}, players: {}, ends: {}, party: {}, even: {}, leavers: {}, lines: {}, triggers: {},
+  const S = { matches, total: matches.length, chars: {}, perks: {}, combos: {}, maps: {}, players: {}, ends: {}, party: {}, even: {}, leavers: {}, lines: {}, triggers: {},
     hw: 0, decided: 0, dur: 0, first: 0, throws: 0, caught: 0, late: 0, leaverMatches: 0, lineCount: 0, lineSecs: 0, bots: {}, side: { hunter: 0, monster: 0 } };
   const newChar = (id, role) => () => ({ id, role, n: 0, w: 0, d: 0, dmg: 0, taken: 0, heal: 0, healRecv: 0, shield: 0, wlTo: 0, wlFrom: 0, deaths: 0, downs: 0, ships: 0, lvl: 0, lvlN: 0,
     feed: 0, firstStage: {}, finalStage: {}, downT: Array(20).fill(0), st: [0, 1, 2, 3].map(() => ({ n: 0, to: 0, from: 0, wlTo: 0, wlFrom: 0, heal: 0, uses: 0, hits: 0 })),
@@ -270,12 +280,24 @@ function compute(matches) {
   console.assert(Object.values(S.players).every(p => p.h.n + p.m.n === p.n && p.w <= p.n), 'player totals are inconsistent');
   return S;
 }
-const ALL = compute(MATCHES);            // players, ranked and the unfiltered pages
-let S = compute(MATCHES.filter(passes)); // the stats pages, following the filter bar
+const slicePasses = k => { const [v, mode, type, solo] = k.split('|'); return (!ST.fl.v || v === ST.fl.v) && (!ST.fl.mode || mode === ST.fl.mode) && (!ST.fl.type || type === ST.fl.type) && (ST.fl.solo || solo !== '1'); };
+// The totals the pages show: counted from the loaded records, or, with stored totals, the stored groups the filters select added up.
+function totals(filtered) {
+  const recent = compute(filtered ? MATCHES.filter(passes) : MATCHES);
+  if (!SUM) return recent;
+  const parts = sliceKeys.filter(k => !filtered || slicePasses(k)).map(k => SUM.slices[k]);
+  const T = parts.length ? SUMMARY.merge(parts) : SUMMARY.plain(compute([]));
+  T.matches = recent.matches;                 // the match objects themselves exist only for what this page loaded
+  for (const [id, p] of Object.entries(T.players)) { p.sessions = new Set(p.sessions); p.matches = recent.players[id]?.matches || []; }
+  for (const l of Object.values(T.lines)) l.vars = new Set(l.vars);
+  return T;
+}
+const ALL = totals(false);     // players, ranked and the unfiltered pages
+let S = totals(true);          // the stats pages, following the filter bar
 // Pick rate means the same thing everywhere on the site (owner's rule): the share of matches the thing appeared in,
 // 100% = it was in every match. Only people count: a slot filled by a bot is left out of both halves of the sum, so a
 // class's characters always add up to 100%. `group` is a class for characters, or 'hunter' / 'monster' for perks.
-const people = group => group === 'hunter' || group === 'monster' ? S.side[group] : S.matches.length - (S.bots[group] || 0);
+const people = group => group === 'hunter' || group === 'monster' ? S.side[group] : S.total - (S.bots[group] || 0);
 const pickRate = (n, group) => pct(n, people(group));
 
 /* ---------- sortable table ---------- */
@@ -348,7 +370,7 @@ function characters() {
     N('Matches', c => c.n), P('Pick rate', c => pickRate(c.n, c.role)), N('Win rate', c => pct(c.w, c.d), c => `<span class="c-${c.role}">${bar(pct(c.w, c.d))}</span>`),
     N('Damage dealt', c => avg(c.dmg, c.n)), N('Damage taken', c => avg(c.taken, c.n)), N('Healing done', c => avg(c.heal, c.n) || null),
     N('Avg level', c => avg(c.lvl, c.lvlN), c => dec(avg(c.lvl, c.lvlN)))], rows, 2, 0, false, c => charHref(c.id))}</div>
-  <p class="note">${(ST.chars.cls === 'All' ? ROLES : [ST.chars.cls]).map(r => `${r}: a person played it in ${num(people(r))} of the ${num(S.matches.length)} matches${S.bots[r] ? ` (a bot in the other ${num(S.bots[r])})` : ''}`).join(' · ')}.
+  <p class="note">${(ST.chars.cls === 'All' ? ROLES : [ST.chars.cls]).map(r => `${r}: a person played it in ${num(people(r))} of the ${num(S.total)} matches${S.bots[r] ? ` (a bot in the other ${num(S.bots[r])})` : ''}`).join(' · ')}.
     Each class's pick rates are out of its own number and add up to 100%.</p>
   <p class="note">Damage and healing are averages per match, against the other team only.</p>`;
 }
@@ -776,14 +798,16 @@ document.getElementById('nav').addEventListener('click', () => menu(false));
 function render(keepScroll) {
   const [, name = '', arg = ''] = location.hash.split('/');
   if (!keepScroll) menu(false);
-  app.innerHTML = (routes[name] || overview)(decodeURIComponent(arg));
+  // with stored totals, these pages still count only the records this page loaded (the most recent ones), and must say so
+  const recentOnly = SUM && ['matchmaking', 'progression', 'store', 'community', 'fairplay', 'match'].includes(name);
+  app.innerHTML = (recentOnly ? `<p class="hint">${eye}This page shows recent records only (${EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : 'none loaded right now'}). All-time numbers for it are not built yet.</p>` : '') + (routes[name] || overview)(decodeURIComponent(arg));
   for (const a of document.querySelectorAll('#nav a')) a.classList.toggle('on', a.dataset.r === (name in parent ? parent[name] : name));
   if (!keepScroll) window.scrollTo(0, 0);
 }
 function setState(path, value) {
   const [group, key] = path.split('.');
   ST[group][key] = value;
-  if (group === 'fl') S = compute(MATCHES.filter(passes));
+  if (group === 'fl') S = totals(true);
   render(true);
 }
 const audio = new Audio();
