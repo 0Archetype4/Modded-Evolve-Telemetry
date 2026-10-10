@@ -10,6 +10,9 @@ const C = window.CATALOG, NAMES = { ...(window.TELEMETRY_SUMMARY?.names || {}), 
 const OFFICIAL = new Set([
   'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
 ]);
+// Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10
+// (ui_rp_placement_matches); the modded public game uses 5 (owner, 2026-10-10).
+const PLACEMENT = 5;
 // the invented sample, and the private local preview, show everything they are given
 const SHOW_ALL = !!window.TELEMETRY_SAMPLE || ['localhost', '127.0.0.1'].includes(location.hostname) && !/[?&]official=1/.test(location.search);
 const RAW = window.TELEMETRY_EVENTS || [];
@@ -69,7 +72,17 @@ const perkInfo = k => C.perks[perkBase(k).toLowerCase()] || { name: k, icon: '',
 const mapInfo = key => { const [k, layer] = String(key).split('|'), m = C.maps[k.toLowerCase()] || { name: pretty(k), minimap: '', layers: {} }, l = m.layers?.[layer];
   return { ...m, name: l ? `${m.name} (${l.name})` : layer ? `${m.name} (${pretty(layer)})` : m.name, minimap: l?.minimap || m.minimap }; };
 const pname = id => NAMES[id] || 'Player ' + String(id).slice(0, 6);
-const division = r => r > 0 ? [...C.ranks].reverse().find(d => r >= d.min) : null;
+// A rating's division. The catalog holds a division's rating range only once the game itself has shown it. In a gap between
+// known ranges the tier is still certain when every division in the gap shares it; above the last known range it is not.
+function division(r) {
+  if (!(r > 0)) return null;
+  const R = C.ranks, exact = R.find(d => d.max != null && r >= d.min && r < d.max);
+  if (exact) return exact;
+  const lo = R.findLastIndex(d => d.max != null && d.max <= r), hi = R.findIndex(d => d.min != null && d.min > r), gap = R.slice(lo + 1, hi < 0 ? R.length : hi);
+  if (!gap.length) return R[R.length - 1];
+  const tier = gap.every(d => d.tier === gap[0].tier) ? gap[0].tier : '';
+  return { name: tier ? `${gap[0].name.split(' ')[0]} (division not known yet)` : hi < 0 ? `${gap[0].name} or higher` : `${gap[0].name} to ${gap.at(-1).name}`, tier, icon: '' };
+}
 
 const img = (src, cls, title = '') => src ? `<img class="${cls}" src="${esc(src)}" alt="${esc(title)}" title="${esc(title)}" loading="lazy">` : '';
 const icon = src => src ? img(src, 'icon') : '<span class="icon"></span>';
@@ -568,15 +581,15 @@ function maps() {
 function ranked() {
   const k = ST.rk, players = Object.values(ALL.players).map(p => {
     const h = p.rk.h, m = p.rk.m, lad = k.view === 'h' ? h : k.view === 'm' ? m : { n: h.n + m.n, w: h.w + m.w, d: h.d + m.d, rating: Math.max(h.rating || 0, m.rating || 0) || null };
-    const placed = k.view === 'o' ? h.n >= 10 || m.n >= 10 : lad.n >= 10;   // the game places a player after 10 ranked matches on a ladder
+    const placed = k.view === 'o' ? h.n >= PLACEMENT || m.n >= PLACEMENT : lad.n >= PLACEMENT, pn = k.view === 'o' ? Math.max(h.n, m.n) : lad.n;   // placement is per ladder
     const mains = Object.values(p.chars).filter(c => k.view === 'o' || (charInfo(c.id).class === 'Monster') === (k.view === 'm')).sort((a, b) => b.n - a.n).slice(0, 3);
-    return { id: p.id, ...lad, placed, div: placed ? division(lad.rating) : null, mains, cls: charInfo(mains[0]?.id).class, region: acct(p.id)?.region };
+    return { id: p.id, ...lad, placed, pn, div: placed ? division(lad.rating) : null, mains, cls: charInfo(mains[0]?.id).class, region: acct(p.id)?.region };
   }).filter(p => p.n && (!k.tier || p.div?.tier === k.tier) && (!k.cls || p.cls === k.cls) && (!k.region || p.region === k.region) && (!k.q || pname(p.id).toLowerCase().includes(k.q.toLowerCase())));
   const wr = p => pct(p.w, p.d) || 0;
   players.sort((a, b) => k.sort === 'winrate' ? wr(b) - wr(a) : k.sort === 'wins' ? b.w - a.w : (b.placed - a.placed) || (b.rating || 0) - (a.rating || 0) || wr(b) - wr(a));
-  const divCell = p => p.div ? `<div class="div">${img(p.div.icon, '', p.div.name)}<span>${esc(p.div.name)}</span></div>` : `<span class="dim">In placement (${p.n}/10)</span>`;
+  const divCell = p => p.div ? `<div class="div">${img(p.div.icon, '', p.div.name)}<span>${esc(p.div.name)}</span></div>` : `<span class="dim">In placement (${p.pn}/${PLACEMENT})</span>`;
   const tierBtn = t => [t, img(C.ranks.find(r => r.tier === t && r.name.endsWith('Destroyer')).icon, 'tier', t)];
-  return `<h1>Ranked</h1><p class="sub">The ranked leaderboard, from ranked matches only. Hunters and Monsters have separate ladders; a player is placed after 10 matches on a ladder.</p>
+  return `<h1>Ranked</h1><p class="sub">The ranked leaderboard, from ranked matches only. Hunters and Monsters have separate ladders; a player is placed after ${PLACEMENT} matches on a ladder.</p>
   ${tabs('rk.view', [['o', 'Overall'], ['h', 'Hunter'], ['m', 'Monster']], k.view)}
   <div class="filters">${tabs('rk.tier', [['', 'All'], tierBtn('gold'), tierBtn('silver'), tierBtn('bronze')], k.tier).replace('class="tabs"', 'class="tabs" style="margin:0"')}
     ${select('rk.cls', ROLES, k.cls, 'All classes')}${select('rk.region', [...new Set(Object.values(ACC.players).map(p => p.region))].sort().map(r => [r, pretty(r)]), k.region, 'All regions')}
@@ -587,8 +600,9 @@ function ranked() {
   ${players.map((p, i) => `<tr data-href="${esc(playerHref(p.id))}"><td>${divCell(p)}</td><td class="n">${i + 1}</td><td><b>${plink(p.id)}</b></td><td><span class="comp">${p.mains.map(c => face(c.id)).join('')}</span></td>
     <td class="n">${num(p.rating)}</td><td class="n dim">${p.w}-${p.d - p.w}</td><td class="n">${bar(pct(p.w, p.d))}</td></tr>`).join('') || '<tr><td colspan="7" class="dim">No players found.</td></tr>'}</tbody></table></div>
   <details style="margin-top:1.2rem"><summary><b>Rank legend</b></summary><div class="in"><div class="legend3">${['bronze', 'silver', 'gold'].map(t => `<div><h3>${t}</h3>${C.ranks.filter(r => r.tier === t).reverse().map(r =>
-    `<div class="div">${img(r.icon, '', r.name)}<span>${esc(r.name)} <span class="dim">from ${num(r.min)}</span></span></div>`).join('')}</div>`).join('')}</div>
-    <p class="note">Division boundaries are provisional. Only the lowest boundary is known; the rest are evenly spaced until the game's own table is read.</p></div></details>`;
+    `<div class="div">${img(r.icon, '', r.name)}<span>${esc(r.name)} <span class="dim">${r.max != null ? `${num(r.min)} to ${num(r.max)}` : 'range not seen yet'}</span></span></div>`).join('')}</div>`).join('')}</div>
+    <p class="note">A division's rating range is listed once the game itself has reported it, which happens when a player reaches it. Until then a player in that part of the ladder is shown by tier, or as "or higher".</p></div></details>
+  <p class="note">Rating and division are as each player's game reported them at the start of their latest ranked match, so they trail the game by one match.</p>`;
 }
 
 function players() {
@@ -617,7 +631,7 @@ function player(id) {
       chall: Object.values(s.reduce((o, x) => { for (const [name, c] of Object.entries(x.chall)) if (c.t >= (o[name]?.t || 0)) o[name] = { name, ...c }; return o; }, {})) }; });
   const x = typeof got === 'object' ? got : { matches: [], xp: [], rewards: [], chall: [] }, gains = x.xp.slice(-30);
   const wait = got === 'loading' ? '<p class="dim">Loading this player\'s history…</p>' : got === 'missing' ? '<p class="dim">This player\'s history could not be loaded.</p>' : '';
-  const lad = (l, name) => { const dv = l.n >= 10 ? division(l.rating) : null; return kv(name, l.n ? `${dv ? esc(dv.name) : `In placement (${l.n}/10)`} · rating ${num(l.rating)} · ${l.w}-${l.d - l.w}` : 'No ranked matches'); };
+  const lad = (l, name) => { const dv = l.n >= PLACEMENT ? division(l.rating) : null; return kv(name, l.n ? `${dv ? esc(dv.name) : `In placement (${l.n}/${PLACEMENT})`} · rating ${num(l.rating)} · ${l.w}-${l.d - l.w}` : 'No ranked matches'); };
   return `<h1>${esc(pname(id))} ${a?.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
   <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
@@ -884,7 +898,7 @@ function about() {
     <li>Records carry no clock time. Dates, queue hours and dome times come from when each record arrived.</li>
     <li>The game never fills in the Monster's distance travelled: the value seen across all ${num(ALL.total)} match records is ${esc(dist)}.</li>
     <li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>
-    <li>Ranked division boundaries are provisional.</li>
+    <li>Ranked: the game keeps its division table hidden, so a division's rating range is known only once the game has reported it. Ratings shown are from the start of each player's latest ranked match.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
