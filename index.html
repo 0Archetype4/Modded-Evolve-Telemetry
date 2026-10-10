@@ -217,7 +217,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
 <script>
 (function () {
   window.TELEMETRY_SITE_DATA = "https://assets.modded-evolve.com/telemetry/site";      // one file per match and one list per day, fetched only when opened
-  var left = 2, done = function () { if (--left) return; var s = document.createElement('script'); s.src = "app.js?v=22ce4be04d6f"; document.body.appendChild(s); };
+  var left = 2, done = function () { if (--left) return; var s = document.createElement('script'); s.src = "app.js?v=05a66187e647"; document.body.appendChild(s); };
   // all-time totals: a file in the asset bucket, replaced when the totals are rebuilt (asked for afresh every ten minutes)
   var t = document.createElement('script'); t.src = "https://assets.modded-evolve.com/telemetry/totals.js" + '?t=' + Math.floor(Date.now() / 600000); t.onload = t.onerror = done; document.head.appendChild(t);
   // recent records: the backend's feed
