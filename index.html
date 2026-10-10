@@ -217,7 +217,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
   fetch("https://social.modded-evolve.com/social/stage2/test/telemetry-v1/feed").then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(function (d) { window.TELEMETRY_PLAYERS = d.players || {}; window.TELEMETRY_EVENTS = d.events || []; })
     .catch(function () { window.TELEMETRY_EVENTS = []; window.TELEMETRY_FEED_ERROR = true; })
-    .finally(function () { var s = document.createElement('script'); s.src = "app.js?v=300e88f678fe"; document.body.appendChild(s); });
+    .finally(function () { var s = document.createElement('script'); s.src = "app.js?v=f27c53d24332"; document.body.appendChild(s); });
 })();
 </script>
 </body>
