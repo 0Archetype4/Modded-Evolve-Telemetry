@@ -9,6 +9,7 @@ const C = window.CATALOG, NAMES = { ...(window.TELEMETRY_SUMMARY?.names || {}), 
 // Add each official release's exact name here when it goes live. The About page says which are counted and how many records were left out.
 const OFFICIAL = new Set([
   'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
+  'Patch-1.0-Hot-Fix-1',    // public game manifest version (client/game-manifest-stage2.json), live 2026-10-10 09:37 UTC
 ]);
 // Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10.
 // The modded game uses 5: the launcher hands the game "ui_rp_placement_matches 5" with its build settings (launcher source
