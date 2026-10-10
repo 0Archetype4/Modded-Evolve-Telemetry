@@ -9,7 +9,7 @@ const C = window.CATALOG, NAMES = { ...(window.TELEMETRY_SUMMARY?.names || {}), 
 // Add each official release's exact name here when it goes live. The About page says which are counted and how many records were left out.
 const OFFICIAL = new Set([
   'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
-  'Patch-1.0-Hot-Fix-1',    // public game manifest version (client/game-manifest-stage2.json), live 2026-10-10 09:37 UTC
+  'Patch-1.0-Hot-Fix-1',    // public game manifest version (client/game-manifest-stage2.json), switched 2026-10-10 09:42:07 UTC; confirmed official by the Patch Work Flow chat
 ]);
 // Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10.
 // The modded game uses 5: the launcher hands the game "ui_rp_placement_matches 5" with its build settings (launcher source
@@ -47,7 +47,10 @@ const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
 const sumv = o => Object.values(o || {}).reduce((a, b) => a + (+b || 0), 0);
 const cell = (o, k, init) => o[k] || (o[k] = init());
 const nw = () => ({ n: 0, w: 0, d: 0 });
-const T = e => e._t ?? (e._t = Date.parse(e._received));
+// When a record happened: the time the player's launcher stamped on it (_received), unless that is more than two minutes later
+// than the moment the server took the record in (_at, on every record since backend 0.1.110). Only a wrong PC clock can do that,
+// and then the server's time is used. A record delivered late keeps its own, earlier, time.
+const T = e => e._t ?? (e._t = (r => Date.parse(e._at) < r - 120000 ? Date.parse(e._at) : r)(Date.parse(e._received)));
 // The dates the loaded records span. Shown beside every total, because the server only sends a recent window: without this a shorter window would shrink the numbers unseen.
 const SPAN = () => SPAN.v || (SPAN.v = EVENTS.reduce((a, e) => [Math.min(a[0], T(e)), Math.max(a[1], T(e))], [Infinity, 0]));
 const stamp = iso => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
