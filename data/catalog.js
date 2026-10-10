@@ -1808,90 +1808,105 @@ window.CATALOG = {
    "name": "Bronze Skilled",
    "tier": "bronze",
    "min": 0,
+   "max": 450,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzeskilled.png"
   },
   {
    "name": "Bronze Expert",
    "tier": "bronze",
-   "min": 450,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzeexpert.png"
   },
   {
    "name": "Bronze Master",
    "tier": "bronze",
-   "min": 704,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzemaster.png"
   },
   {
    "name": "Bronze Elite",
    "tier": "bronze",
-   "min": 957,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzeelite.png"
   },
   {
    "name": "Bronze Destroyer",
    "tier": "bronze",
-   "min": 1211,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/bronzedestroyer.png"
   },
   {
    "name": "Silver Skilled",
    "tier": "silver",
-   "min": 1464,
+   "min": 1500,
+   "max": 1680,
    "icon": "https://assets.modded-evolve.com/images/ranks/silverskilled.png"
   },
   {
    "name": "Silver Expert",
    "tier": "silver",
-   "min": 1718,
+   "min": 1680,
+   "max": 1830,
    "icon": "https://assets.modded-evolve.com/images/ranks/silverexpert.png"
   },
   {
    "name": "Silver Master",
    "tier": "silver",
-   "min": 1971,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/silvermaster.png"
   },
   {
    "name": "Silver Elite",
    "tier": "silver",
-   "min": 2225,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/silverelite.png"
   },
   {
    "name": "Silver Destroyer",
    "tier": "silver",
-   "min": 2479,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/silverdestroyer.png"
   },
   {
    "name": "Gold Skilled",
    "tier": "gold",
-   "min": 2732,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/goldskilled.png"
   },
   {
    "name": "Gold Expert",
    "tier": "gold",
-   "min": 2986,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/goldexpert.png"
   },
   {
    "name": "Gold Master",
    "tier": "gold",
-   "min": 3239,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/goldmaster.png"
   },
   {
    "name": "Gold Elite",
    "tier": "gold",
-   "min": 3493,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/goldelite.png"
   },
   {
    "name": "Gold Destroyer",
    "tier": "gold",
-   "min": 3746,
+   "min": null,
+   "max": null,
    "icon": "https://assets.modded-evolve.com/images/ranks/golddestroyer.png"
   }
  ],
