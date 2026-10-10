@@ -10,8 +10,9 @@ const C = window.CATALOG, NAMES = { ...(window.TELEMETRY_SUMMARY?.names || {}), 
 const OFFICIAL = new Set([
   'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
 ]);
-// Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10
-// (ui_rp_placement_matches); the modded public game uses 5 (owner, 2026-10-10).
+// Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10.
+// The modded game uses 5: the launcher hands the game "ui_rp_placement_matches 5" with its build settings (launcher source
+// Services/Stage2LocalServices.cs), and the account server's ladder uses the same number (TestRankedLadder.PlacementMatches).
 const PLACEMENT = 5;
 // the invented sample, and the private local preview, show everything they are given
 const SHOW_ALL = !!window.TELEMETRY_SAMPLE || ['localhost', '127.0.0.1'].includes(location.hostname) && !/[?&]official=1/.test(location.search);
@@ -72,18 +73,18 @@ const perkInfo = k => C.perks[perkBase(k).toLowerCase()] || { name: k, icon: '',
 const mapInfo = key => { const [k, layer] = String(key).split('|'), m = C.maps[k.toLowerCase()] || { name: pretty(k), minimap: '', layers: {} }, l = m.layers?.[layer];
   return { ...m, name: l ? `${m.name} (${l.name})` : layer ? `${m.name} (${pretty(layer)})` : m.name, minimap: l?.minimap || m.minimap }; };
 const pname = id => NAMES[id] || 'Player ' + String(id).slice(0, 6);
-// A rating's division. The catalog holds a division's rating range only once the game itself has shown it. In a gap between
-// known ranges the tier is still certain when every division in the gap shares it; above the last known range it is not.
+// A rating's division. The catalog holds a division's rating range only once the game itself has shown it (and the three tiers'
+// ranges). Outside the known ranges the tier is still certain, and the divisions it could be are the unseen ones around it.
 function division(r) {
   if (!(r > 0)) return null;
   const R = C.ranks, exact = R.find(d => d.max != null && r >= d.min && r < d.max);
   if (exact) return exact;
-  const lo = R.findLastIndex(d => d.max != null && d.max <= r), hi = R.findIndex(d => d.min != null && d.min > r), gap = R.slice(lo + 1, hi < 0 ? R.length : hi);
-  if (!gap.length) return R[R.length - 1];
-  const tier = gap.every(d => d.tier === gap[0].tier) ? gap[0].tier : '';
-  return { name: tier ? `${gap[0].name.split(' ')[0]} (division not known yet)` : hi < 0 ? `${gap[0].name} or higher` : `${gap[0].name} to ${gap.at(-1).name}`, tier, icon: '' };
+  const tier = Object.keys(C.tiers).find(t => r >= C.tiers[t][0] && r < C.tiers[t][1]) || R[R.length - 1].tier;
+  const lo = R.findLastIndex(d => d.max != null && d.max <= r), hi = R.findIndex(d => d.min != null && d.min > r);
+  const open = R.slice(lo + 1, hi < 0 ? R.length : hi).filter(d => d.tier === tier), Tier = tier[0].toUpperCase() + tier.slice(1);
+  if (open.length === 1) return open[0];
+  return { name: open.length === 2 ? `${open[0].name} or ${open[1].name.split(' ')[1]}` : `${Tier} (division not seen yet)`, tier, icon: '' };
 }
-
 const img = (src, cls, title = '') => src ? `<img class="${cls}" src="${esc(src)}" alt="${esc(title)}" title="${esc(title)}" loading="lazy">` : '';
 const icon = src => src ? img(src, 'icon') : '<span class="icon"></span>';
 const face = id => { const c = charInfo(id); return `<img class="face c-${esc(c.class)}" src="${esc(c.thumb)}" alt="${esc(c.name)}" title="${esc(c.name)}" loading="lazy">`; };
@@ -578,9 +579,17 @@ function maps() {
     N('Average match', m => avg(m.dur, m.n), m => clock(avg(m.dur, m.n))), N('First fight', m => avg(m.first, m.n), m => clock(avg(m.first, m.n))), P('Domes that caught', m => pct(m.caught, m.throws))], list, 1)}`;
 }
 
+// The ranked ladder as the account server holds it: the rating after a player's latest match (what the game itself shows), with
+// matches, wins and losses per side. It comes with every update (tools/summarize.js puts it in the totals). Without it the
+// ladders are worked out from the match records, whose ratings are from the start of each match and so trail by one match.
+const side = l => l ? { n: l.played, w: l.wins, d: l.wins + l.losses, rating: l.rating } : { n: 0, w: 0, d: 0, rating: null };
+const ladderOf = p => { const l = SUM?.ladder?.[p.id]; return l ? { h: side(l.hunter), m: side(l.monster) } : p.rk; };
+// one rating for a player across both ladders: the better one they are placed on, else the better one so far
+const topRating = (h, m) => { const placed = [h, m].filter(x => x.n >= PLACEMENT); return Math.max(...(placed.length ? placed : [h, m]).map(x => x.rating || 0)) || null; };
 function ranked() {
-  const k = ST.rk, players = Object.values(ALL.players).map(p => {
-    const h = p.rk.h, m = p.rk.m, lad = k.view === 'h' ? h : k.view === 'm' ? m : { n: h.n + m.n, w: h.w + m.w, d: h.d + m.d, rating: Math.max(h.rating || 0, m.rating || 0) || null };
+  const k = ST.rk, ids = new Set([...Object.keys(ALL.players), ...Object.keys(SUM?.ladder || {})]);
+  const players = [...ids].map(id => ALL.players[id] || { id, chars: {}, rk: { h: side(), m: side() } }).map(p => {
+    const { h, m } = ladderOf(p), lad = k.view === 'h' ? h : k.view === 'm' ? m : { n: h.n + m.n, w: h.w + m.w, d: h.d + m.d, rating: topRating(h, m) };
     const placed = k.view === 'o' ? h.n >= PLACEMENT || m.n >= PLACEMENT : lad.n >= PLACEMENT, pn = k.view === 'o' ? Math.max(h.n, m.n) : lad.n;   // placement is per ladder
     const mains = Object.values(p.chars).filter(c => k.view === 'o' || (charInfo(c.id).class === 'Monster') === (k.view === 'm')).sort((a, b) => b.n - a.n).slice(0, 3);
     return { id: p.id, ...lad, placed, pn, div: placed ? division(lad.rating) : null, mains, cls: charInfo(mains[0]?.id).class, region: acct(p.id)?.region };
@@ -601,8 +610,8 @@ function ranked() {
     <td class="n">${num(p.rating)}</td><td class="n dim">${p.w}-${p.d - p.w}</td><td class="n">${bar(pct(p.w, p.d))}</td></tr>`).join('') || '<tr><td colspan="7" class="dim">No players found.</td></tr>'}</tbody></table></div>
   <details style="margin-top:1.2rem"><summary><b>Rank legend</b></summary><div class="in"><div class="legend3">${['bronze', 'silver', 'gold'].map(t => `<div><h3>${t}</h3>${C.ranks.filter(r => r.tier === t).reverse().map(r =>
     `<div class="div">${img(r.icon, '', r.name)}<span>${esc(r.name)} <span class="dim">${r.max != null ? `${num(r.min)} to ${num(r.max)}` : 'range not seen yet'}</span></span></div>`).join('')}</div>`).join('')}</div>
-    <p class="note">A division's rating range is listed once the game itself has reported it, which happens when a player reaches it. Until then a player in that part of the ladder is shown by tier, or as "or higher".</p></div></details>
-  <p class="note">Rating and division are as each player's game reported them at the start of their latest ranked match, so they trail the game by one match.</p>`;
+    <p class="note">Tiers: Bronze below ${num(C.tiers.silver[0])}, Silver from ${num(C.tiers.silver[0])}, Gold from ${num(C.tiers.gold[0])}. A division's own range is listed once the game has asked the server about it, which happens when a player reaches it. Until then a player there is shown by tier, or as one of the two divisions it can be.</p></div></details>
+  <p class="note">${SUM?.ladder ? 'Ratings, matches, wins and losses are the game server\'s own ladder, as of the last update.' : 'Rating and division are as each player\'s game reported them at the start of their latest ranked match, so they trail the game by one match.'}</p>`;
 }
 
 function players() {
@@ -611,7 +620,7 @@ function players() {
   <div class="filters"><input type="search" data-st="players.q" placeholder="Search players" aria-label="Search players" value="${esc(ST.players.q)}">
     ${select('players.region', [...new Set(Object.values(ACC.players).map(p => p.region))].sort().map(r => [r, pretty(r)]), ST.players.region, 'All regions')}</div>
   ${hint('Tap a player to open their profile: characters, ranked ladders, progression, challenges and latest matches.')}
-  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => p.rating), N('Matches', p => p.n),
+  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => topRating(ladderOf(p).h, ladderOf(p).m)), N('Matches', p => p.n),
     N('Win rate', p => pct(p.w, p.d), p => bar(pct(p.w, p.d))), N('As Hunter', p => pct(p.h.w, p.h.d), p => p.h.n ? `${fpct(pct(p.h.w, p.h.d))} <span class="dim">(${p.h.n})</span>` : '–'),
     N('As Monster', p => pct(p.m.w, p.m.d), p => p.m.n ? `${fpct(pct(p.m.w, p.m.d))} <span class="dim">(${p.m.n})</span>` : '–'), Tx('Most played', p => charInfo(fav(p).id).name, p => chip(fav(p).id)),
     Tx('Region', p => pretty(acct(p.id)?.region)), N('Last seen', p => acct(p.id)?.t, p => day(acct(p.id)?.t))],
@@ -636,7 +645,7 @@ function player(id) {
   <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
     tile('Account level', num(p.level)), tile('Time played', hours(p.secs)), tile('Play sessions', p.sessions.size ? num(p.sessions.size) : '–', p.sessions.size ? `${dec(p.n / p.sessions.size)} matches each` : 'not recorded'), tile('Chat', dec(p.chat / p.n), 'messages per match'))}
-  <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(p.rk.h, 'Hunter ladder')}${lad(p.rk.m, 'Monster ladder')}</div></section>
+  <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(ladderOf(p).h, 'Hunter ladder')}${lad(ladderOf(p).m, 'Monster ladder')}</div></section>
     <section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(a?.q.dur, a?.q.ok)))}${kv('Left the queue', num(a ? a.q.n - a.q.ok : null))}
       ${kv('Queue dodges', num(a?.q.dodges))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section></div>
   <h2>Characters</h2>${table('pc-' + id, [Tx('Character', c => charInfo(c.id).name, c => chip(c.id)), Tx('Class', c => charInfo(c.id).class, c => classCell(charInfo(c.id).class)),
@@ -898,7 +907,7 @@ function about() {
     <li>Records carry no clock time. Dates, queue hours and dome times come from when each record arrived.</li>
     <li>The game never fills in the Monster's distance travelled: the value seen across all ${num(ALL.total)} match records is ${esc(dist)}.</li>
     <li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>
-    <li>Ranked: the game keeps its division table hidden, so a division's rating range is known only once the game has reported it. Ratings shown are from the start of each player's latest ranked match.</li>
+    <li>Ranked ratings, matches, wins and losses come from the game server's own ladder, handed over with each update. The game keeps its division table hidden, so a division's rating range is known only once the game has asked the server about it.</li>
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
