@@ -18,8 +18,12 @@ const PLACEMENT = 5;
 // the invented sample, and the private local preview, show everything they are given
 const SHOW_ALL = !!window.TELEMETRY_SAMPLE || ['localhost', '127.0.0.1'].includes(location.hostname) && !/[?&]official=1/.test(location.search);
 const RAW = window.TELEMETRY_EVENTS || [];
-const EVENTS = RAW.filter(e => e.BaseHeader?.Context !== 'aisoak' && (SHOW_ALL || OFFICIAL.has(e.BaseHeader?.Context)));
+const counted = e => e.BaseHeader?.Context !== 'aisoak' && (SHOW_ALL || OFFICIAL.has(e.BaseHeader?.Context));
+const EVENTS = RAW.filter(counted);
 const LEFT_OUT = RAW.length - EVENTS.length;
+// What was left out, by the release name each record carries ('' when the game files match no release). The About page lists
+// it, so a new public release that has not been added to OFFICIAL above is seen at once instead of silently going missing.
+const LEFT_BY = {}; for (const e of RAW) if (!counted(e)) { const c = e.BaseHeader?.Context || ''; LEFT_BY[c] = (LEFT_BY[c] || 0) + 1; }
 const ROLES = ['Assault', 'Trapper', 'Medic', 'Support', 'Monster'], HUNTERS = ROLES.slice(0, 4);
 const app = document.getElementById('app');
 const banner = document.getElementById('sample');
@@ -889,7 +893,8 @@ function fairplay() {
 
 function about() {
   const A = ACC, one = f => Object.keys(A.hdr[f] || {}).map(v => v === '' ? '(empty)' : v).join(', '), ctx = Object.keys(A.hdr.Context || {}).filter(Boolean);
-  const dist = Object.keys(ALL.dist || {}).join(', '), leftOut = SUM ? SUM.recordsLeftOut : LEFT_OUT;
+  const dist = Object.keys(ALL.dist || {}).join(', '), leftOut = SUM ? SUM.recordsLeftOut : LEFT_OUT,
+    leftBy = Object.entries((SUM ? SUM.leftOutBy : LEFT_BY) || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${num(n)} ${c ? 'marked ' + esc(c) : 'from game files that match no release'}`).join(', ');
   const feeds = [['Characters, Matchups, Perks, Maps, Match page', 'ServerRoundRecord', 'The PC hosting the match'], ['Weapon, ability, stage and source numbers', 'ServerPlayer Assault / Trapper / Medic / Support / Monster records', 'The PC hosting the match'],
     ['Fight heatmap, dome list', 'ServerDomeRecord', 'The PC hosting the match'], ['Lobby panel, unfinished matches', 'ServerRoundStartRecord', 'The PC hosting the match'], ['Dialogue', 'ServerDialogueRecord', 'The PC hosting the match'],
     ['Anti-cheat kicks', 'ServerEACClientKickRecord', 'The PC hosting the match'], ['Players, Ranked, skins, chat, late joins', 'ClientRoundRecord', "Each player's own game"], ['Matchmaking', 'ClientMatchmakingRecord', "Each player's own game"],
@@ -913,7 +918,7 @@ function about() {
     <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
     <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
-    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(esc).join(', ') : ''}. Records from any other build are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far` : ' (this local preview shows everything)'}.</li>
+    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(esc).join(', ') : ''}. Records from any other build are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
     <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
   <h2>What the site holds</h2>${tiles(tile('Records', num(Object.values(A.records).reduce((a, r) => a + r.n, 0))), tile('Matches', num(ALL.total), 'finished'), tile('Players', num(Object.keys(A.players).length)),
     tile('Covers', SUM ? `${day_(SUM.from)} to ${day_(SUM.to)}` : EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', SUM ? 'updated ' + stamp(SUM.built) : ''))}`;
