@@ -219,7 +219,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
   window.TELEMETRY_SITE_DATA = "https://assets.modded-evolve.com/telemetry/site";      // a file per match and per player and a list per day, fetched only when opened
   // all-time totals: a file in the asset bucket, replaced each time the NAS recounts (asked for afresh every ten minutes)
   var t = document.createElement('script'); t.src = "https://assets.modded-evolve.com/telemetry/totals.js" + '?t=' + Math.floor(Date.now() / 600000);
-  t.onload = t.onerror = function () { var s = document.createElement('script'); s.src = "app.js?v=8f4427ed5e95"; document.body.appendChild(s); };
+  t.onload = t.onerror = function () { var s = document.createElement('script'); s.src = "app.js?v=3ea4fb54f045"; document.body.appendChild(s); };
   document.head.appendChild(t);
 })();
 </script>
