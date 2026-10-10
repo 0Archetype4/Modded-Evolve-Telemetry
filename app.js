@@ -583,12 +583,13 @@ function maps() {
 // matches, wins and losses per side. It comes with every update (tools/summarize.js puts it in the totals). Without it the
 // ladders are worked out from the match records, whose ratings are from the start of each match and so trail by one match.
 const side = l => l ? { n: l.played, w: l.wins, d: l.wins + l.losses, rating: l.rating } : { n: 0, w: 0, d: 0, rating: null };
-const ladderOf = p => { const l = SUM?.ladder?.[p.id]; return l ? { h: side(l.hunter), m: side(l.monster) } : p.rk; };
+// (with the server's ladder, a player it does not list has no ranked standing, whatever their own game reported)
+const ladderOf = p => { const l = SUM?.ladder?.[p.id]; return SUM?.ladder ? { h: side(l?.hunter), m: side(l?.monster) } : p.rk; };
 // one rating for a player across both ladders: the better one they are placed on, else the better one so far
 const topRating = (h, m) => { const placed = [h, m].filter(x => x.n >= PLACEMENT); return Math.max(...(placed.length ? placed : [h, m]).map(x => x.rating || 0)) || null; };
 function ranked() {
-  const k = ST.rk, ids = new Set([...Object.keys(ALL.players), ...Object.keys(SUM?.ladder || {})]);
-  const players = [...ids].map(id => ALL.players[id] || { id, chars: {}, rk: { h: side(), m: side() } }).map(p => {
+  const k = ST.rk, ids = Object.keys(SUM?.ladder || ALL.players);
+  const players = ids.map(id => ALL.players[id] || { id, chars: {}, rk: { h: side(), m: side() } }).map(p => {
     const { h, m } = ladderOf(p), lad = k.view === 'h' ? h : k.view === 'm' ? m : { n: h.n + m.n, w: h.w + m.w, d: h.d + m.d, rating: topRating(h, m) };
     const placed = k.view === 'o' ? h.n >= PLACEMENT || m.n >= PLACEMENT : lad.n >= PLACEMENT, pn = k.view === 'o' ? Math.max(h.n, m.n) : lad.n;   // placement is per ladder
     const mains = Object.values(p.chars).filter(c => k.view === 'o' || (charInfo(c.id).class === 'Monster') === (k.view === 'm')).sort((a, b) => b.n - a.n).slice(0, 3);
