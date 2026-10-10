@@ -214,21 +214,10 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
 
 <script>
 (function () {
-  var FEED = "https://social.modded-evolve.com/social/stage2/test/telemetry-v1/feed", seen = '';
-  function mark(d) { var e = d.events || []; return e.length + '|' + (e.length ? e[e.length - 1]._received : ''); }
-  function get() { return fetch(FEED, { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }); }
-  get().then(function (d) { window.TELEMETRY_PLAYERS = d.players || {}; window.TELEMETRY_EVENTS = d.events || []; seen = mark(d); })
+  fetch("https://social.modded-evolve.com/social/stage2/test/telemetry-v1/feed").then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (d) { window.TELEMETRY_PLAYERS = d.players || {}; window.TELEMETRY_EVENTS = d.events || []; })
     .catch(function () { window.TELEMETRY_EVENTS = []; window.TELEMETRY_FEED_ERROR = true; })
     .finally(function () { var s = document.createElement('script'); s.src = "app.js?v=300e88f678fe"; document.body.appendChild(s); });
-  setInterval(function () {
-    if (document.hidden || !seen || document.getElementById('fresh')) return;
-    get().then(function (d) {
-      if (mark(d) === seen) return;
-      var b = document.createElement('button'); b.id = 'fresh'; b.textContent = 'New matches recorded. Tap to refresh.'; b.onclick = function () { location.reload(); };
-      b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9;padding:.6rem 1rem;border:1px solid #8a728c;border-radius:6px;background:#161616;color:#fff;font:inherit;cursor:pointer';
-      document.body.appendChild(b);
-    }).catch(function () {});
-  }, 60000);
 })();
 </script>
 </body>
