@@ -542,6 +542,8 @@ function character(id) {
   // the four ability slots, for the skill-point tables: the item most often seen in each slot
   const inSlot = j => Object.values(kit.items).filter(it => it.label === 'Ability' + j).sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))[0];
   const abil = [1, 2, 3, 4].map(j => inSlot(j) ? named('Ability' + j, inSlot(j).key) : slotItem(id, 'Ability' + j) || { name: 'Ability ' + j, icon: '' });
+  // builds: the complete ones, from matches in which the Monster reached Stage 3 (or, if none did, the furthest stage any reached)
+  const deep = Math.max(0, ...Object.values(kit.builds).map(b => b.levels.length)), builds = Object.values(kit.builds).filter(b => b.levels.length === deep);
   // the four abilities, always in their own order (1 to 4, the same on every Monster): points invested in each and its share of the list's points
   const ranked = (title, matches, points) => { const total = points.reduce((a, b) => a + b, 0);
     return `<div class="build"><div class="bh"><b>${title}</b><span>${plural(total, 'point', 'points')} in ${plural(matches, 'match', 'matches')}</span></div>${abil.map((a, j) => ({ a, v: points[j] })).map((x, i) =>
@@ -570,10 +572,10 @@ function character(id) {
       ${[0, 1, 2].filter(s => kit.lvN[s]).map(s => ranked('Stage ' + (s + 1), kit.lvN[s], kit.pts[s])).join('')}</div>
     <p class="note">How many skill points players invested in each ability, and what share of all the points invested that is. Each list adds up to 100%. A stage's list counts only the points spent at that stage; Overall counts every point spent in the match. Abilities are always listed in their own order, 1 to 4.</p>
     <h3 style="margin-top:1.4rem">Most used builds</h3>
-    <div class="builds">${Object.values(kit.builds).sort((a, b) => b.n - a.n).slice(0, 6).map((b, i) => `<div class="build"><div class="bh"><b>Build ${i + 1}</b><span>${b.n} ${b.n === 1 ? 'match' : 'matches'} · ${fpct(pct(b.w, b.d))} won</span></div>
+    <div class="builds">${builds.sort((a, b) => b.n - a.n).slice(0, 6).map((b, i) => `<div class="build"><div class="bh"><b>Build ${i + 1}</b><span>${b.n} ${b.n === 1 ? 'match' : 'matches'} · ${fpct(pct(b.w, b.d))} won</span></div>
       <table class="skill"><thead><tr><th></th>${[0, 1, 2].map(s => `<th>Stage ${s + 1}</th>`).join('')}</tr></thead><tbody>
       ${abil.map((a, j) => `<tr><td>${icon(a.icon)}${esc(a.name)}</td>${[0, 1, 2].map(s => `<td>${b.levels[s] ? pips(b.levels[s][j]) : '<span class="dim" title="The match ended before this stage">–</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('')}</div>
-    <p class="note">A build is the exact points a player had in every ability at each stage. Filled dots are points spent. A dash means the match ended before the Monster reached that stage.</p>
+    <p class="note">A build is the exact points a player had in every ability at each stage. Filled dots are points spent. ${deep === 3 ? `Only the ${num(builds.reduce((a, b) => a + b.n, 0))} matches in which the Monster reached Stage 3 are counted here, so every build is complete; matches that ended earlier are in the lists above.` : deep ? `No match with these filters reached Stage ${deep + 1}, so these are the builds of matches that ended at Stage ${deep}; a dash is a stage that was not reached.` : ''}</p>
     <div class="cols"><section><h2>Stages</h2><div class="panel">${[1, 2, 3].map(s => kv(`First fight at Stage ${s}`, plural(c.firstStage[s] || 0, 'match', 'matches'))).join('')}${[1, 2, 3].map(s => kv(`Finished at Stage ${s}`, plural(c.finalStage[s] || 0, 'match', 'matches'))).join('')}</div></section></div>`
   : `<div class="cols"><section><h2>Healing and shielding</h2><div class="panel">${kv('Healing done', num(avg(kit.heal, kit.n)) + ' per match')}${kv('Healing received', num(avg(c.healRecv, c.n)) + ' per match')}
       ${kv('Shielding received', num(avg(c.shield, c.n)) + ' per match')}${kv('Dropship returns', dec(avg(c.ships, c.n)) + ' per match')}</div></section>
