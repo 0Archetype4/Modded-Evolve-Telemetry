@@ -60,7 +60,11 @@ const covers = () => window.TELEMETRY_SUMMARY && window.SUMMARY ? `every match f
 const sessionOf = e => e._session || e.ClientHeader?.SSOSessionID || '';
 const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
 // the patch name is whatever the client put in the context tag; records without one fall back to the game build
-const ver = e => { const c = e.BaseHeader?.Context; return c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e); };
+// Release names that are shown and counted as one patch. Owner, 2026-10-11 (through the Skin Creation chat): Hot Fix 1 only
+// restored two badge files and changed no gameplay value, so it and the Release are one "Patch 1.0". Every record keeps its own
+// release name in the archive, so taking a line out of here splits them again at the next recount.
+const PATCH_OF = { 'Patch-1.0-Release': 'Patch 1.0', 'Patch-1.0-Hot-Fix-1': 'Patch 1.0' };
+const ver = e => { const c = e.BaseHeader?.Context; return PATCH_OF[c] || (c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e)); };
 const pretty = s => String(s ?? '').replace(/^(ONLINE_REGION_|CLASSIFICATION_REGION_|ROUND_END_REASON_|eLSR?_)/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
   .toLowerCase().replace(/^./, c => c.toUpperCase());
 // the names the site uses for the game's match types and modes (owner's wording: Ranked, Arcade, Custom).
@@ -358,7 +362,7 @@ function account(events, starts) {
     for (const [k, v] of [['Config', b.Config], ['Platform', b.Platform], ['Changelist', b.Changelist], ['BuildNumber', b.BuildNumber], ['Micropatch', b.Micropatch], ['Context', b.Context],
       ['PublicAppID', b.PublicAppID], ['base', b.Version], ['player', ch?.Version], ['match', e.ServerRoundHeader?.Version], ['perPlayer', e.ServerPlayerRoundHeader?.Version]])
       if (v !== undefined) bump(cell(A.hdr, k, () => ({})), String(v));
-    const vs = cell(A.vers, `${ver(e)} · build ${build(e)} · ${b.Platform}`, () => ({ n: 0, t: 0 })); vs.n++; vs.t = Math.max(vs.t, t);
+    const vs = cell(A.vers, `${b.Context || ver(e)} · build ${build(e)} · ${b.Platform}`, () => ({ n: 0, t: 0 })); vs.n++; vs.t = Math.max(vs.t, t);
     if (kind === 'ServerEACClientKickRecord') { const k = cell(A.kicks, d.code + '|' + d.message, () => ({ n: 0, t: 0 })); k.n++; k.t = Math.max(k.t, t); }
     if (!ch) continue;
     const id = ch.My2kID, p = cell(A.players, id, () => ({ t: 0, since: t, region: '', cregion: '', lang: '', audio: '', founder: null, bal: null, fresh: 0, q: { n: 0, ok: 0, dur: 0, dodges: 0 } }));
@@ -1010,7 +1014,7 @@ function about() {
     <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
     <li>When a host starts a match that never finishes, the game can carry that match's weapon list and damage into the record of the next one: another character's weapon names, or both characters' damage mixed together. So a match played right after an unfinished one on the same host counts for matches, picks and wins, and is left out of every damage, healing, weapon, ability and skill-point number, on character pages and players' own pages alike. The same goes for a record that lists weapons that are not the character's own, and for one that holds an impossible number (the new-player scenario scripts hits of 10,000,000).</li>
-    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(esc).join(', ') : ''}. Records from any other build are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
+    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(n => esc(n) + (PATCH_OF[n] ? ` (shown as ${esc(PATCH_OF[n])})` : '')).join(', ') : ''}. Records from any other build are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
     <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
   <h2>What the site holds</h2>${tiles(tile('Records', num(Object.values(A.records).reduce((a, r) => a + r.n, 0))), tile('Matches', num(ALL.total), 'finished'), tile('Players', num(Object.keys(A.players).length)),
     tile('Covers', SUM ? `${day_(SUM.from)} to ${day_(SUM.to)}` : EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', SUM ? 'updated ' + stamp(SUM.built) : ''))}`;
