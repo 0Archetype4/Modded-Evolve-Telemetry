@@ -125,6 +125,9 @@ const slot = id => byId.get(id) || byId.set(id, { id, players: {}, clients: {}, 
 // matched to the catalog by the slot it arrives in. Slot order as the first real match showed it: Hunters 1 primary, 2 class ability,
 // 3 secondary, 4 special; Monsters 1 to 4 in card order. ponytail: one name is assumed to mean one item for every character that carries it.
 const SLOT_TYPE = ['Primary', 'Class Ability', 'Secondary', 'Special Ability'];
+// The order weapons and abilities are listed in, the same for every character. Hunters: primary, secondary, special ability,
+// class ability (the record's slots 1, 3, 4, 2), then the pistol. Monsters: abilities 1 to 4, then melee, pounce and the rest.
+const SLOT_ORDER = [['Ability1', 'Ability3', 'Ability4', 'Ability2', 'Pistol', 'Uncategorized'], ['Ability1', 'Ability2', 'Ability3', 'Ability4', 'BasicAttack', 'Pounce', 'Special', 'Uncategorized']];
 // the kit a per-player record carries: its four weapon or ability names, in slot order
 const kitOf = p => [1, 2, 3, 4].map(j => p.Data['Ability' + j]?.Name ?? '').join('|');
 // Two kinds of record are never used for damage numbers, whatever kit they carry:
@@ -174,6 +177,11 @@ const MATCH = new Map(MATCHES.map(m => [m.id, m]));
 const won = (m, role) => m.decided ? (role === 'Monster') !== m.hunterWin : null;
 const pid = (m, role) => m.clients[role]?.ClientHeader?.My2kID || null;
 const isRanked = m => String(m.hdr.MatchType).startsWith('Ranked');
+// The rank a player held going into a ranked match: the division of the rating the game recorded for their seat at the start
+// of it. Everyone starts at exactly 1500, so that is a first ranked match, with no rank yet. Matches played during placement
+// are included: the game shows no division then, but the rating is already the player's own.
+const NO_RANK = 'No rating yet';
+const rankOf = (m, role) => { const r = m.d.PlayerGlickoScores?.[role] ?? m.clients[role]?.Data.GlickoScore; return !(r > 0) ? '' : r === 1500 ? NO_RANK : division(r).name; };
 
 /* ---------- page state and filters ---------- */
 /* Stored totals (data/totals.js, written by tools/summarize.js from the archive of every record) cover every match since launch,
@@ -184,7 +192,7 @@ const sliceKeys = SUM ? Object.keys(SUM.slices) : [];
 for (const [k, v] of Object.entries(SUM?.items || {})) ITEMS[k] ||= v;      // weapon and ability names the job learned from the records (learnItems)
 const optionsOf = (i, f) => SUM ? [...new Set(sliceKeys.map(k => k.split('|')[i]))].sort() : uniq(f);
 // solo matches are left out by default, unless they are all there is
-const ST = { fl: { v: '', mode: '', type: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
+const ST = { fl: { v: '', mode: '', type: '', rank: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
   players: { q: '', region: '', all: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
 const passes = m => (!ST.fl.v || m.v === ST.fl.v) && (!ST.fl.mode || m.hdr.GameMode === ST.fl.mode) && (!ST.fl.type || m.hdr.MatchType === ST.fl.type) && (ST.fl.solo || m.hdr.Multiplayer);
 const uniq = f => [...new Set(MATCHES.map(f))].sort();
@@ -199,8 +207,8 @@ const tabs = (path, opts, cur) => `<div class="tabs">${opts.map(o => { const [v,
 /* ---------- totals ----------
    ponytail: all of this runs in the browser on every load and every filter change. Fine for a few thousand matches;
    when the file gets heavy, do this join in the collector and ship the totals instead. */
-function compute(matches) {
-  const S = { matches, total: matches.length, chars: {}, perks: {}, combos: {}, maps: {}, players: {}, ends: {}, party: {}, even: {}, leavers: {}, lines: {}, triggers: {},
+function compute(matches, nested) {
+  const S = { matches, total: matches.length, chars: {}, ranks: {}, perks: {}, combos: {}, maps: {}, players: {}, ends: {}, party: {}, even: {}, leavers: {}, lines: {}, triggers: {},
     hw: 0, decided: 0, dur: 0, first: 0, throws: 0, caught: 0, late: 0, leaverMatches: 0, lineCount: 0, lineSecs: 0, bots: {}, side: { hunter: 0, monster: 0 }, dist: {} };
   const newChar = (id, role) => () => ({ id, role, n: 0, w: 0, d: 0, healRecv: 0, shield: 0, deaths: 0, downs: 0, ships: 0, lvl: 0, lvlN: 0,
     feed: 0, firstStage: {}, finalStage: {}, downT: Array(20).fill(0), perks: {}, combos: {}, vs: {}, kits: {}, players: {}, skins: {} });
@@ -306,6 +314,13 @@ function compute(matches) {
       }
     }
   }
+  // Ranked matches once more, split by the rank each player held going into the match (rankOf): the same character numbers,
+  // one set per division, for the Rank filter on the Characters pages. Each seat is counted on its own, as a match with that
+  // one player in it.
+  if (!nested) { const seats = {};
+    for (const m of matches) if (isRanked(m)) for (const role of ROLES) { const p = m.players[role], k = p && !p.ServerPlayerRoundHeader.IsBot && rankOf(m, role);
+      if (k) cell(seats, k, () => []).push({ ...m, players: { [role]: p } }); }
+    for (const [k, list] of Object.entries(seats)) S.ranks[k] = compute(list, true).chars; }
   // self-check: shouts in the console if the join above stops adding up
   console.assert(Object.values(S.maps).reduce((a, m) => a + m.n, 0) === matches.length, 'map totals do not add up to the matches');
   console.assert(Object.values(S.players).every(p => p.h.n + p.m.n === p.n && p.w <= p.n), 'player totals are inconsistent');
@@ -405,12 +420,32 @@ function ownKit(id) {
   return Object.fromEntries(Object.entries(n).map(([v, o]) => [v, Object.keys(o).sort((a, b) => o[b] - o[a] || a.localeCompare(b))[0]]));
 }
 // a character's damage, healing, weapon and ability numbers under the current filters, from seats recorded with their own kit
-function ownNumbers(id) {
-  const cache = S.own || (S.own = {});        // S is rebuilt whenever a filter changes
-  if (cache[id]) return cache[id];
-  const own = ownKit(id), parts = SUM ? sliceKeys.filter(slicePasses).map(k => SUM.slices[k].chars[id]?.kits[own[k.split('|')[0]]]) : [S.chars[id]?.kits[own['']]];
-  return cache[id] = SUMMARY.merge(parts.filter(Boolean)) || { n: 0, dmg: 0, taken: 0, heal: 0, wlTo: 0, wlFrom: 0, st: [], items: {}, src: {}, builds: {}, pts: [0, 1, 2].map(() => [0, 0, 0, 0]), lvN: [0, 0, 0] };
+function ownNumbers(id, rank = '') {
+  const cache = S.own || (S.own = {}), key = id + '|' + rank;        // S is rebuilt whenever a filter changes
+  if (cache[key]) return cache[key];
+  const own = ownKit(id), mine = new Set(Object.values(own));
+  // (with a rank chosen the piles of all patches are already added together, so "own kit" is the own kit of any patch)
+  const parts = rank ? Object.entries(rankChars()[id]?.kits || {}).filter(([sig]) => mine.has(sig)).map(([, kit]) => kit)
+    : SUM ? sliceKeys.filter(slicePasses).map(k => SUM.slices[k].chars[id]?.kits[own[k.split('|')[0]]]) : [S.chars[id]?.kits[own['']]];
+  return cache[key] = SUMMARY.merge(parts.filter(Boolean)) || { n: 0, dmg: 0, taken: 0, heal: 0, wlTo: 0, wlFrom: 0, st: [], items: {}, src: {}, builds: {}, pts: [0, 1, 2].map(() => [0, 0, 0, 0]), lvN: [0, 0, 0] };
 }
+// The Rank filter of the Characters pages. A choice is one division ("Silver Expert"), a whole tier ("tier:silver") or
+// NO_RANK. rankChars() is S.chars for that choice: the seats of ranked matches whose player held that rank going in.
+const rankList = () => { const have = Object.keys(S.ranks || {}), at = k => { const i = C.ranks.findIndex(r => k.startsWith(r.name)); return i < 0 ? 99 : i; };
+  return have.sort((a, b) => at(a) - at(b) || a.localeCompare(b)); };
+const inRank = (k, sel) => sel.startsWith('tier:') ? k !== NO_RANK && k.toLowerCase().startsWith(sel.slice(5)) : k === sel;
+function rankChars() {
+  const cache = S.rk || (S.rk = {}), sel = ST.fl.rank;
+  return cache[sel] || (cache[sel] = SUMMARY.merge(Object.entries(S.ranks || {}).filter(([k]) => inRank(k, sel)).map(([, chars]) => chars)) || {});
+}
+const rankSeats = k => Object.values(S.ranks[k]).reduce((a, c) => a + c.n, 0);
+const rankBar = () => { const list = rankList(), tiers = ['bronze', 'silver', 'gold'].filter(t => list.some(k => inRank(k, 'tier:' + t)));
+  return !list.length ? '' : `<div class="filters"><label>Rank ${select('fl.rank', [...tiers.map(t => ['tier:' + t, `${t[0].toUpperCase() + t.slice(1)} (all) · ${num(list.filter(k => inRank(k, 'tier:' + t)).reduce((a, k) => a + rankSeats(k), 0))}`]),
+    ...list.map(k => [k, `${k} · ${num(rankSeats(k))}`])], ST.fl.rank, 'All ranks, all matches')}</label></div>
+  ${ST.fl.rank ? `<p class="note">Rank filter: ranked matches only. Each player is counted under the division of the rating they had going into the match, so matches played during placement are included; a player's first ranked match has no rating yet. The number beside each rank is how many players' matches it holds. Pick rate is the share of that class's players at this rank.</p>` : ''}`; };
+// Hunters against the Monster under the current filters: the share of matches with a winner that each side won
+const versus = () => { const h = pct(S.hw, S.decided); return h == null ? '' : `<div class="versus"><b class="h">Hunters ${fpct(h)}</b><span class="vbar" role="img" aria-label="Hunters won ${fpct(h)}, the Monster ${fpct(100 - h)}"><i style="width:${h.toFixed(1)}%"></i></span><b class="m">${fpct(100 - h)} Monster</b></div>
+  <p class="note">${num(S.hw)} Hunter wins and ${num(S.decided - S.hw)} Monster wins in ${num(S.decided)} matches with a winner${S.total - S.decided ? ` (${num(S.total - S.decided)} more ended without one)` : ''}.</p>`; };
 // Pick rate means the same thing everywhere on the site (owner's rule): the share of matches the thing appeared in,
 // 100% = it was in every match. Only people count: a slot filled by a bot is left out of both halves of the sum, so a
 // class's characters always add up to 100%. `group` is a class for characters, or 'hunter' / 'monster' for perks.
@@ -475,49 +510,53 @@ document.getElementById('nav').innerHTML = `<a href="#/" data-r="">Overview</a>`
 function overview() {
   return `<div class="hero"><h1>Modded Evolve Telemetry</h1>
     <p class="sub">Statistics for Evolve Stage 2, built from the records the game writes about every match, queue and sign-in. Pick a section.</p></div>
+  ${filterBar()}${versus()}
   <div class="tiles">${SECTIONS.map(s => `<a class="tile" href="#/${s[0]}"><div class="v" style="font-size:1.25rem">${s[1]}</div><div class="n" style="font-size:.95rem">${s[2]}</div></a>`).join('')}</div>`;
 }
 
 function characters() {
-  const rows = Object.values(S.chars).filter(c => ST.chars.cls === 'All' || c.role === ST.chars.cls), own = c => ownNumbers(c.id);
-  return `<h1>Characters</h1><p class="sub">How often each character is picked, and how often that side wins. Pick rate is the share of matches the character was played in: 100% would mean every match. Only matches played by people are counted.</p>${filterBar()}
+  const R = ST.fl.rank, chars = R ? rankChars() : S.chars, seats = {};
+  for (const c of Object.values(chars)) seats[c.role] = (seats[c.role] || 0) + c.n;         // with a rank: that class's players at the rank
+  const rows = Object.values(chars).filter(c => ST.chars.cls === 'All' || c.role === ST.chars.cls), own = c => ownNumbers(c.id, R);
+  return `<h1>Characters</h1><p class="sub">How often each character is picked, and how often that side wins. Pick rate is the share of matches the character was played in: 100% would mean every match. Only matches played by people are counted.</p>${filterBar()}${rankBar()}${R ? '' : versus()}
   ${tabs('chars.cls', ['All', ...ROLES.map(r => [r, img(C.classIcons[r], 'cls') + r])], ST.chars.cls)}
   ${hint('Tap a character to open its full page: weapons and abilities, stages, perks, skins, opponents and more.')}
   <div class="bigchips">${table('chars', [Tx('Character', c => charInfo(c.id).name, c => chip(c.id, true)), Tx('Class', c => c.role, c => classCell(c.role)),
-    N('Matches', c => c.n), P('Pick rate', c => pickRate(c.n, c.role)), N('Win rate', c => pct(c.w, c.d), c => `<span class="c-${c.role}">${bar(pct(c.w, c.d))}</span>`),
+    N('Matches', c => c.n), P('Pick rate', c => R ? pct(c.n, seats[c.role]) : pickRate(c.n, c.role)), N('Win rate', c => pct(c.w, c.d), c => `<span class="c-${c.role}">${bar(pct(c.w, c.d))}</span>`),
     N('Damage dealt', c => avg(own(c).dmg, own(c).n)), N('Damage taken', c => avg(own(c).taken, own(c).n)), N('Healing done', c => avg(own(c).heal, own(c).n) || null),
     N('Avg level', c => avg(c.lvl, c.lvlN), c => dec(avg(c.lvl, c.lvlN)))], rows, 2, 0, false, c => charHref(c.id))}</div>
-  <p class="note">${(ST.chars.cls === 'All' ? ROLES : [ST.chars.cls]).map(r => `${r}: a person played it in ${num(people(r))} of the ${num(S.total)} matches${S.bots[r] ? ` (a bot in the other ${num(S.bots[r])})` : ''}`).join(' · ')}.
+  <p class="note">${(ST.chars.cls === 'All' ? ROLES : [ST.chars.cls]).map(r => R ? `${r}: ${num(seats[r] || 0)} players' matches at this rank` : `${r}: a person played it in ${num(people(r))} of the ${num(S.total)} matches${S.bots[r] ? ` (a bot in the other ${num(S.bots[r])})` : ''}`).join(' · ')}.
     Each class's pick rates are out of its own number and add up to 100%.</p>
   <p class="note">Damage and healing are averages per match, against the other team only, from the matches whose damage record can be relied on (a few in every hundred cannot; About the data explains).</p>`;
 }
 
 function character(id) {
-  const c = S.chars[id], info = charInfo(id);
-  if (!c) return `<h1>${esc(info.name)}</h1>${filterBar()}<p class="sub">No matches recorded for this character with these filters.</p>`;
+  const R = ST.fl.rank, chars = R ? rankChars() : S.chars, c = chars[id], info = charInfo(id);
+  if (!c) return `<h1>${esc(info.name)}</h1>${filterBar()}${rankBar()}<p class="sub">No matches recorded for this character with these filters.</p>`;
+  const classSeats = Object.values(chars).reduce((a, x) => a + (x.role === c.role ? x.n : 0), 0);
   // damage, healing, weapons, abilities and sources: only seats recorded with this character's own kit; each slot is named after their own item
-  const kit = ownNumbers(id), named = (label, key) => slotItem(id, label) || itemInfo(key);
+  const kit = ownNumbers(id, R), named = (label, key) => slotItem(id, label) || itemInfo(key);
   const mon = c.role === 'Monster', items = Object.values(kit.items).map(it => ({ ...it, info: named(it.label, it.key) })), total = items.reduce((a, it) => a + it.dmg, 0);
   const leftOut = c.n - kit.n ? `<p class="note">Damage, healing, weapon and ability numbers on this page come from ${num(kit.n)} of these ${num(c.n)} matches. The other ${num(c.n - kit.n)} are left out because the game's record of them cannot be relied on: the match came right after one its host had started and never finished (the game can carry weapon data over from it), or the record lists weapons that are not this character's own (in the tutorial, a cut-down kit), or it holds an impossible number. They still count for matches, pick rate and win rate.</p>` : '';
   const lines = Object.values(S.lines).filter(l => l.speaker === id);
   // the four ability slots, for the skill-point tables: the item most often seen in each slot
   const inSlot = j => Object.values(kit.items).filter(it => it.label === 'Ability' + j).sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))[0];
   const abil = [1, 2, 3, 4].map(j => inSlot(j) ? named('Ability' + j, inSlot(j).key) : slotItem(id, 'Ability' + j) || { name: 'Ability ' + j, icon: '' });
-  // a ranked list of the four abilities, most points first: points invested in each and its share of all points in the list
+  // the four abilities, always in their own order (1 to 4, the same on every Monster): points invested in each and its share of the list's points
   const ranked = (title, matches, points) => { const total = points.reduce((a, b) => a + b, 0);
-    return `<div class="build"><div class="bh"><b>${title}</b><span>${plural(total, 'point', 'points')} in ${plural(matches, 'match', 'matches')}</span></div>${abil.map((a, j) => ({ a, v: points[j] })).sort((x, y) => y.v - x.v).map((x, i) =>
+    return `<div class="build"><div class="bh"><b>${title}</b><span>${plural(total, 'point', 'points')} in ${plural(matches, 'match', 'matches')}</span></div>${abil.map((a, j) => ({ a, v: points[j] })).map((x, i) =>
       `<div class="rk-row"><span class="rk-n">${i + 1}</span>${icon(x.a.icon)}<span class="rk-name">${esc(x.a.name)}<small>${plural(x.v, 'point', 'points')}</small></span><span class="c-Monster rk-v">${bar(pct(x.v, total))}</span></div>`).join('')}</div>`; };
-  return `<div class="headline c-${c.role}">${img(info.thumb, 'big', info.name)}<div>${classTag(c.role)}<h1 style="margin-top:.4rem">${esc(info.name)}</h1></div></div>${filterBar()}
-  ${tiles(tile('Matches', num(c.n)), tile('Pick rate', fpct(pickRate(c.n, c.role)), `of ${c.role} matches`), tile('Win rate', fpct(pct(c.w, c.d))),
+  return `<div class="headline c-${c.role}">${img(info.thumb, 'big', info.name)}<div>${classTag(c.role)}<h1 style="margin-top:.4rem">${esc(info.name)}</h1></div></div>${filterBar()}${rankBar()}
+  ${tiles(tile('Matches', num(c.n)), tile('Pick rate', fpct(R ? pct(c.n, classSeats) : pickRate(c.n, c.role)), R ? `of ${c.role} players at this rank` : `of ${c.role} matches`), tile('Win rate', fpct(pct(c.w, c.d))),
     tile('Average level', dec(avg(c.lvl, c.lvlN))), tile('Damage dealt', num(avg(kit.dmg, kit.n)), 'per match'), tile('Damage taken', num(avg(kit.taken, kit.n)), 'per match'),
     tile('To wildlife', num(avg(kit.wlTo, kit.n)), 'damage per match'), tile('From wildlife', num(avg(kit.wlFrom, kit.n)), 'damage per match'),
     mon ? tile('Feeding', dec(avg(c.feed, c.n)), 'per match') : tile('Deaths', dec(avg(c.deaths, c.n)), `${dec(avg(c.downs, c.n))} downs per match`))}${leftOut}
   <h2>${mon ? 'Abilities and attacks' : 'Weapons and equipment'}</h2>
-  ${table('items-' + id, [Tx('Item', it => it.info.name || it.label, it => `${icon(it.info.icon)}${esc(it.info.name || it.label)}`),
+  ${table('items-' + id, [Tx('Item', it => SLOT_ORDER[mon ? 1 : 0].indexOf(it.label) + 1 || 99, it => `${icon(it.info.icon)}${esc(it.info.name || it.label)}`),
     N('Uses', it => avg(it.uses, it.n) || null, it => it.uses ? dec(it.uses / it.n) : '–'), N('Misses', it => avg(it.miss, it.n) || null, it => it.uses ? dec(it.miss / it.n) : '–'),
     N('Hits', it => avg(it.hits, it.n) || null, it => it.uses ? dec(it.hits / it.n) : '–'), N('Wildlife hits', it => avg(it.hitsWl, it.n) || null, it => it.uses ? dec(it.hitsWl / it.n) : '–'),
     mon ? P('Hit rate', it => pct(it.hits, it.uses)) : N('Damage per use', it => avg(it.dmg, it.uses)),
-    N('Damage', it => avg(it.dmg, it.n)), N('To wildlife', it => avg(it.dmgWl, it.n)), N('Share', it => pct(it.dmg, total), it => bar(pct(it.dmg, total)))], items, 6)}
+    N('Damage', it => avg(it.dmg, it.n)), N('To wildlife', it => avg(it.dmgWl, it.n)), N('Share', it => pct(it.dmg, total), it => bar(pct(it.dmg, total)))], items, 0, 0, true)}
   <p class="note">${mon ? 'A use counts as a hit when it damages a Hunter before the ability is used again.' : 'The game counts every damage tick as a hit, so hits can exceed uses and its miss count is unreliable for Hunters.'} Averages per match.</p>
   <h2>By Monster stage</h2>
   ${table('stage-' + id, [Tx('Stage', s => s.i, s => 'Stage ' + s.i), N('Matches reaching it', s => s.n), N('Damage dealt', s => avg(s.to, s.n)), N('Damage taken', s => avg(s.from, s.n)),
@@ -529,12 +568,12 @@ function character(id) {
     <h3>Most popular abilities</h3>
     <div class="ranks">${ranked('Overall', kit.lvN[0], [0, 1, 2, 3].map(j => kit.pts.reduce((a, s) => a + s[j], 0)))}
       ${[0, 1, 2].filter(s => kit.lvN[s]).map(s => ranked('Stage ' + (s + 1), kit.lvN[s], kit.pts[s])).join('')}</div>
-    <p class="note">How many skill points players invested in each ability, and what share of all the points invested that is. Each list adds up to 100%. A stage's list counts only the points spent at that stage; Overall counts every point spent in the match.</p>
+    <p class="note">How many skill points players invested in each ability, and what share of all the points invested that is. Each list adds up to 100%. A stage's list counts only the points spent at that stage; Overall counts every point spent in the match. Abilities are always listed in their own order, 1 to 4.</p>
     <h3 style="margin-top:1.4rem">Most used builds</h3>
     <div class="builds">${Object.values(kit.builds).sort((a, b) => b.n - a.n).slice(0, 6).map((b, i) => `<div class="build"><div class="bh"><b>Build ${i + 1}</b><span>${b.n} ${b.n === 1 ? 'match' : 'matches'} · ${fpct(pct(b.w, b.d))} won</span></div>
-      <table class="skill"><thead><tr><th></th>${b.levels.map((_, s) => `<th>Stage ${s + 1}</th>`).join('')}</tr></thead><tbody>
-      ${abil.map((a, j) => `<tr><td>${icon(a.icon)}${esc(a.name)}</td>${b.levels.map(l => `<td>${pips(l[j])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('')}</div>
-    <p class="note">A build is the exact points a player had in every ability at each stage. Filled dots are points spent.</p>
+      <table class="skill"><thead><tr><th></th>${[0, 1, 2].map(s => `<th>Stage ${s + 1}</th>`).join('')}</tr></thead><tbody>
+      ${abil.map((a, j) => `<tr><td>${icon(a.icon)}${esc(a.name)}</td>${[0, 1, 2].map(s => `<td>${b.levels[s] ? pips(b.levels[s][j]) : '<span class="dim" title="The match ended before this stage">–</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('')}</div>
+    <p class="note">A build is the exact points a player had in every ability at each stage. Filled dots are points spent. A dash means the match ended before the Monster reached that stage.</p>
     <div class="cols"><section><h2>Stages</h2><div class="panel">${[1, 2, 3].map(s => kv(`First fight at Stage ${s}`, plural(c.firstStage[s] || 0, 'match', 'matches'))).join('')}${[1, 2, 3].map(s => kv(`Finished at Stage ${s}`, plural(c.finalStage[s] || 0, 'match', 'matches'))).join('')}</div></section></div>`
   : `<div class="cols"><section><h2>Healing and shielding</h2><div class="panel">${kv('Healing done', num(avg(kit.heal, kit.n)) + ' per match')}${kv('Healing received', num(avg(c.healRecv, c.n)) + ' per match')}
       ${kv('Shielding received', num(avg(c.shield, c.n)) + ' per match')}${kv('Dropship returns', dec(avg(c.ships, c.n)) + ' per match')}</div></section>
