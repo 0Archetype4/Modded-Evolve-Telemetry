@@ -4,8 +4,11 @@
 // display names: those that came with the stored totals, then those of the players in the loaded recent records
 const C = window.CATALOG, NAMES = { ...(window.TELEMETRY_SUMMARY?.names || {}), ...(window.TELEMETRY_PLAYERS || {}) };
 // Owner's rule (2026-10-09): only matches played on an OFFICIAL public release count. Each record names the release it was played on
-// (BaseHeader.Context, set by the launcher only when the player's game files are exactly that release). Everything else is left out:
-// older public builds, betas and drafts, files that match no release, and Turtle Rock's own test tag ("aisoak").
+// (BaseHeader.Context). The PUBLIC launcher writes the public release list's version text there at every PLAY, after its file
+// check and repair, whether or not every file matched (launcher 0.1.69, MainWindow.Stage2.cs; read by the Test Client chat
+// 2026-10-11); it is empty only when the launcher could not read the release list. The test channel is stricter and has its
+// own names. Everything else is left out: older public builds, betas and drafts, records with no name, and Turtle Rock's own
+// test tag ("aisoak").
 // Add each official release's exact name here when it goes live. The About page says which are counted and how many records were left out.
 const OFFICIAL = new Set([
   'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
@@ -989,7 +992,7 @@ function fairplay() {
 function about() {
   const A = ACC, one = f => Object.keys(A.hdr[f] || {}).map(v => v === '' ? '(empty)' : v).join(', '), ctx = Object.keys(A.hdr.Context || {}).filter(Boolean);
   const dist = Object.keys(ALL.dist || {}).join(', '), leftOut = SUM ? SUM.recordsLeftOut : LEFT_OUT,
-    leftBy = Object.entries((SUM ? SUM.leftOutBy : LEFT_BY) || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${num(n)} ${c ? 'marked ' + esc(c) : 'from game files that match no release'}`).join(', ');
+    leftBy = Object.entries((SUM ? SUM.leftOutBy : LEFT_BY) || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${num(n)} ${c ? 'marked ' + esc(c) : 'with no release name'}`).join(', ');
   const feeds = [['Characters, Matchups, Perks, Maps, Match page', 'ServerRoundRecord', 'The PC hosting the match'], ['Weapon, ability, stage and source numbers', 'ServerPlayer Assault / Trapper / Medic / Support / Monster records', 'The PC hosting the match'],
     ['Fight heatmap, dome list', 'ServerDomeRecord', 'The PC hosting the match'], ['Lobby panel, unfinished matches', 'ServerRoundStartRecord', 'The PC hosting the match'], ['Dialogue', 'ServerDialogueRecord', 'The PC hosting the match'],
     ['Anti-cheat kicks', 'ServerEACClientKickRecord', 'The PC hosting the match'], ['Players, Ranked, skins, chat, late joins', 'ClientRoundRecord', "Each player's own game"], ['Matchmaking', 'ClientMatchmakingRecord', "Each player's own game"],
@@ -1014,7 +1017,7 @@ function about() {
     <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
     <li>When a host starts a match that never finishes, the game can carry that match's weapon list and damage into the record of the next one: another character's weapon names, or both characters' damage mixed together. So a match played right after an unfinished one on the same host counts for matches, picks and wins, and is left out of every damage, healing, weapon, ability and skill-point number, on character pages and players' own pages alike. The same goes for a record that lists weapons that are not the character's own, and for one that holds an impossible number (the new-player scenario scripts hits of 10,000,000).</li>
-    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(n => esc(n) + (PATCH_OF[n] ? ` (shown as ${esc(PATCH_OF[n])})` : '')).join(', ') : ''}. Records from any other build are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
+    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(n => esc(n) + (PATCH_OF[n] ? ` (shown as ${esc(PATCH_OF[n])})` : '')).join(', ') : ''}. The launcher writes the release name on every record when the game is started: on the public game it is the public release at that moment, and it is blank only when the launcher could not read the release list. Records from any other build, or with no name, are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
     <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
   <h2>What the site holds</h2>${tiles(tile('Records', num(Object.values(A.records).reduce((a, r) => a + r.n, 0))), tile('Matches', num(ALL.total), 'finished'), tile('Players', num(Object.keys(A.players).length)),
     tile('Covers', SUM ? `${day_(SUM.from)} to ${day_(SUM.to)}` : EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', SUM ? 'updated ' + stamp(SUM.built) : ''))}`;
