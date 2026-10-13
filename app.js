@@ -214,6 +214,11 @@ const tabs = (path, opts, cur) => `<div class="tabs">${opts.map(o => { const [v,
 /* ---------- totals ----------
    ponytail: all of this runs in the browser on every load and every filter change. Fine for a few thousand matches;
    when the file gets heavy, do this join in the collector and ship the totals instead. */
+// Dome positions are counted per cell of a GRID x GRID net laid over the map's own bounds, not kept one by one.
+const GRID = 50, mapBounds = mapKey => C.maps[String(mapKey).split('|')[0].toLowerCase()]?.bounds || [0, 0, 1, 1];
+const gridCell = (mapKey, x, y) => { const b = mapBounds(mapKey), u = (x - b[0]) / (b[2] - b[0]), v = (y - b[1]) / (b[3] - b[1]);       // 'off': outside the map's bounds, or no position. Counted, not drawn
+  return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? Math.min(GRID - 1, Math.floor(u * GRID)) + '|' + Math.min(GRID - 1, Math.floor(v * GRID)) : 'off'; };
+const gsum = (mp, i) => Object.values(mp.grid).reduce((a, g) => a + g[i], 0);       // i: 0 domes, 1 Monster caught, 2 Monster damage, 3 Hunters downed, 4-6 domes at stage 1-3
 function compute(matches, nested) {
   const S = { matches, total: matches.length, chars: {}, ranks: {}, perks: {}, combos: {}, maps: {}, players: {}, ends: {}, party: {}, even: {}, leavers: {}, lines: {}, triggers: {},
     hw: 0, decided: 0, dur: 0, first: 0, throws: 0, caught: 0, late: 0, leaverMatches: 0, lineCount: 0, lineSecs: 0, bots: {}, side: { hunter: 0, monster: 0 }, dist: {} };
@@ -230,12 +235,12 @@ function compute(matches, nested) {
     if (m.decided) { S.decided++; S.hw += m.hunterWin; }
     S.dur += m.dur; S.first += d.FirstEncounterTime || 0; S.throws += d.Dome?.Throws || 0; S.caught += d.Dome?.Captures || 0;
     const far = String(mon.TotalDistanceTraveled ?? 'nothing'); S.dist[far] = (S.dist[far] || 0) + 1;       // the Monster's distance travelled, as recorded (About page)
-    const mp = cell(S.maps, m.mapKey, () => ({ key: m.mapKey, n: 0, w: 0, d: 0, dur: 0, first: 0, throws: 0, caught: 0, endDome: 0, wlMon: 0, wlHun: 0, ends: {}, domes: [], inside: {} }));
+    const mp = cell(S.maps, m.mapKey, () => ({ key: m.mapKey, n: 0, w: 0, d: 0, dur: 0, first: 0, throws: 0, caught: 0, endDome: 0, wlMon: 0, wlHun: 0, ends: {}, grid: {}, inside: {} }));
     mp.n++; mp.w += m.hunterWin; mp.d += decided; mp.dur += m.dur; mp.first += d.FirstEncounterTime || 0; mp.throws += d.Dome?.Throws || 0; mp.caught += d.Dome?.Captures || 0;
     mp.wlMon += d.Wildlife?.DamageToMonster || 0; mp.wlHun += d.Wildlife?.DamageToHunters || 0; mp.endDome += m.domes.some(e => e.Data.GameEnding) ? 1 : 0;
     for (const e of m.domes) for (const r of ROLES) mp.inside[r] = (mp.inside[r] || 0) + (e.Data.InDome?.[r] ? 1 : 0);
-    for (const e of m.domes) mp.domes.push({ x: e.Data.DomeXPosition, y: e.Data.DomeYPosition, caught: !!e.Data.InDome?.Monster, dmg: e.Data.MonsterSummary?.TotalDamageReceived || 0,
-      downs: sumv(e.Data.HunterSummary?.TotalIncaps), stage: e.Data.MonsterSummary?.Start?.Stage });
+    for (const e of m.domes) { const g = cell(mp.grid, gridCell(m.mapKey, e.Data.DomeXPosition, e.Data.DomeYPosition), () => [0, 0, 0, 0, 0, 0, 0]), st = e.Data.MonsterSummary?.Start?.Stage;
+      g[0]++; g[1] += e.Data.InDome?.Monster ? 1 : 0; g[2] += e.Data.MonsterSummary?.TotalDamageReceived || 0; g[3] += sumv(e.Data.HunterSummary?.TotalIncaps); if (st >= 1 && st <= 3) g[3 + st]++; }
     const end = m.hdr.WinningTeam + '|' + m.hdr.WinCondition;
     cell(S.ends, end, () => ({ n: 0 })).n++; cell(mp.ends, end, () => ({ n: 0 })).n++;
     const pk = cell(S.party, (d.InitialPartySizes || []).join(' + ') + '|' + (d.MercHealthBuff || ''), nw); pk.n++; pk.w += m.hunterWin; pk.d += decided;
@@ -341,13 +346,17 @@ function totals(filtered) {
   const parts = sliceKeys.filter(k => !filtered || slicePasses(k)).map(k => SUM.slices[k]);
   const T = parts.length ? SUMMARY.merge(parts) : SUMMARY.plain(compute([]));
   T.matches = recent.matches;                 // the match objects themselves exist only for what this page loaded
-  for (const [id, p] of Object.entries(T.players)) { p.sessions = new Set(p.sessions); p.matches = recent.players[id]?.matches || []; }
   for (const l of Object.values(T.lines)) l.vars = new Set(l.vars);
   return T;
 }
 // (window.TELEMETRY_JOB: tools/summarize.js runs this file to count, and calls compute() and account() itself)
 const ALL = window.TELEMETRY_JOB ? null : totals(false);     // players, ranked and the unfiltered pages
 let S = window.TELEMETRY_JOB ? null : totals(true);          // the stats pages, following the filter bar
+// Per-player rows are not in the stored totals, which every visitor downloads: they grow with every new player. The all-time table
+// of players, and who played each character, sit in a file of their own beside the match files (tools/summarize.js writes it),
+// fetched the first time a page needs it. roster() gives { players, chars }, or 'loading' / 'missing' until then.
+const roster = () => SUM ? fetchOnce('players', `${SITE_DATA}/players.js?t=${Math.floor(Date.now() / 600000)}`) : { players: ALL.players };
+const waiting = (title, R) => `<h1>${title}</h1><p class="dim">${R === 'missing' ? 'The players list could not be loaded.' : 'Loading the players list…'}</p>`;
 
 /* ---------- account totals ----------
    Everything the Matchmaking, Progression, Store, Community, Fair play and About pages show that does not come from a finished
@@ -495,15 +504,16 @@ const endsTable = (id, ends, total) => table(id, [Tx('Ending', e => e.k, e => { 
   Object.entries(ends).map(([k, v]) => ({ k, n: v.n })), 1);
 const HEAT = [['all', 'All fights'], ['caught', 'Monster caught'], ['dmg', 'Monster damage'], ['downs', 'Hunters down'], ['s1', 'Stage 1'], ['s2', 'Stage 2'], ['s3', 'Stage 3'], ['move', 'Movement'], ['fps', 'Frame rate']];
 function heat(mapKey, domes, view = 'all', numbered = false) {
-  const info = mapInfo(mapKey), b = C.maps[mapKey.split('|')[0].toLowerCase()]?.bounds || [0, 0, 1, 1];
+  const info = mapInfo(mapKey), b = mapBounds(mapKey);
   if (view === 'move' || view === 'fps') return `<div class="heat">${img(info.minimap, '', info.name)}<div class="none">No data. The game builds this record but never switches it on (${num(ACC.records.ClientProfilingRecord?.n || 0)} received).</div></div>`;
-  const pts = domes.filter(d => view === 'caught' ? d.caught : view === 'dmg' ? d.dmg : view === 'downs' ? d.downs : view[0] === 's' ? d.stage === +view[1] : true)
-    .map(d => ({ ...d, wt: view === 'dmg' ? d.dmg : view === 'downs' ? d.downs : 1 }));
-  const mx = Math.max(1, ...pts.map(p => p.wt));
+  // one match: its own domes, numbered. The totals: the grid compute() counted, a cell the brighter the more it holds of what the view shows.
+  const col = { all: 0, caught: 1, dmg: 2, downs: 3, s1: 4, s2: 5, s3: 6 }[view];
+  const pts = numbered ? domes : Object.entries(domes).filter(([k, g]) => g[col] && k !== 'off').map(([k, g]) => { const [i, j] = k.split('|').map(Number); return { i, j, wt: g[col] }; });
+  const mx = pts.reduce((a, p) => Math.max(a, p.wt || 1), 1);
   return `<div class="heat">${img(info.minimap, '', info.name)}<svg viewBox="0 0 100 100" role="img" aria-label="Dome positions on ${esc(info.name)}">${pts.map((p, i) => {
+    if (!numbered) return `<rect x="${p.i * 100 / GRID}" y="${100 - (p.j + 1) * 100 / GRID}" width="${100 / GRID}" height="${100 / GRID}" fill="#ff3b1f" opacity="${(.1 + .8 * p.wt / mx).toFixed(2)}"/>`;
     const x = ((p.x - b[0]) / (b[2] - b[0]) * 100).toFixed(1), y = (100 - (p.y - b[1]) / (b[3] - b[1]) * 100).toFixed(1);       // the minimap is north up: world y grows upward
-    return numbered ? `<circle cx="${x}" cy="${y}" r="3.2" fill="${p.caught ? '#c0392b' : '#777'}" stroke="#fff" stroke-width=".4"/><text x="${x}" y="${(+y + 1.2).toFixed(1)}" font-size="3.4" text-anchor="middle" fill="#fff">${i + 1}</text>`
-      : `<circle cx="${x}" cy="${y}" r="${(1.4 + 2.4 * p.wt / mx).toFixed(1)}" fill="#ff3b1f" opacity=".3"/>`; }).join('')}</svg></div>`;
+    return `<circle cx="${x}" cy="${y}" r="3.2" fill="${p.caught ? '#c0392b' : '#777'}" stroke="#fff" stroke-width=".4"/><text x="${x}" y="${(+y + 1.2).toFixed(1)}" font-size="3.4" text-anchor="middle" fill="#fff">${i + 1}</text>`; }).join('')}</svg></div>`;
 }
 
 /* ---------- pages ---------- */
@@ -604,8 +614,7 @@ function character(id) {
     <section><h2>Skins used</h2>${table('skin-' + id, [Tx('Skin', s => s.k), N('Matches', s => s.n), N('Share', s => pct(s.n, sumv(c.skins)), s => bar(pct(s.n, sumv(c.skins))))], Object.entries(c.skins).map(([k, n]) => ({ k, n })), 1)}</section>
   </div>
   ${lines.length ? `<h2>Most-heard voice lines</h2>${table('cl-' + id, [Tx('Line', l => l.response), Tx('Triggered by', trigger), N('Times played', l => l.n), Tx('', l => '', l => play(lineUrl(l.speaker, l.response)))], lines, 2, 10)}` : ''}
-  <h2>Most matches on ${esc(info.name)}</h2>${table('cpl-' + id, [Tx('Player', p => pname(p.id), p => plink(p.id)), N('Matches', p => p.n), P('Win rate', p => pct(p.w, p.d)),
-    N('Level', p => ALL.players[p.id]?.chars[id]?.level)], Object.entries(c.players).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, p => playerHref(p.id))}`;
+  ${topPlayers(id, c, info.name)}`;
 }
 
 function matchups() {
@@ -663,14 +672,15 @@ function perks() {
 function maps() {
   const list = Object.values(S.maps).sort((a, b) => b.n - a.n), mp = S.maps[ST.maps.key] || list[0];
   if (!mp) return `<h1>Maps</h1>${filterBar()}<p class="sub">No matches with these filters.</p>`;
-  return `<h1>Maps</h1><p class="sub">Which side wins on each map, and where the fights happen. Each dot is a dome: Hunters throw one where they catch the Monster.</p>${filterBar()}
+  return `<h1>Maps</h1><p class="sub">Which side wins on each map, and where the fights happen. The heat map shows where domes went up: Hunters throw one where they catch the Monster.</p>${filterBar()}
   ${tabs('maps.key', list.map(m => [m.key, esc(mapInfo(m.key).name)]), mp.key)}
   <h2>Fight heatmap</h2>
-  <div class="heatwrap">${heat(mp.key, mp.domes, ST.maps.view)}<div>${tabs('maps.view', HEAT, ST.maps.view)}
-    <div class="panel">${kv('Domes thrown', num(mp.throws))}${kv('Caught the Monster', `${num(mp.caught)} · ${fpct(pct(mp.caught, mp.throws))}`)}${kv('Monster damage in domes', num(mp.domes.reduce((a, d) => a + d.dmg, 0)))}
-      ${kv('Hunters downed in domes', num(mp.domes.reduce((a, d) => a + d.downs, 0)))}
-      ${HUNTERS.map(r => kv(`${r} inside when it went up`, fpct(pct(mp.inside[r], mp.domes.length)))).join('')}</div>
-    <p class="note">Dots are placed with each map's own minimap bounds from the game files.</p></div></div>
+  <div class="heatwrap">${heat(mp.key, mp.grid, ST.maps.view)}<div>${tabs('maps.view', HEAT, ST.maps.view)}
+    <div class="panel">${kv('Domes thrown', num(mp.throws))}${kv('Caught the Monster', `${num(mp.caught)} · ${fpct(pct(mp.caught, mp.throws))}`)}${kv('Monster damage in domes', num(gsum(mp, 2)))}
+      ${kv('Hunters downed in domes', num(gsum(mp, 3)))}
+      ${HUNTERS.map(r => kv(`${r} inside when it went up`, fpct(pct(mp.inside[r], gsum(mp, 0))))).join('')}</div>
+    <p class="note">Dome positions are grouped into a ${GRID} by ${GRID} grid over the map; a brighter cell holds more.</p>
+    <p class="note">Positions are placed with each map's own minimap bounds from the game files.</p></div></div>
   <h2>Map numbers</h2>
   ${tiles(tile('Matches', num(mp.n)), tile('Hunters win', fpct(pct(mp.w, mp.d))), tile('Average match', clock(avg(mp.dur, mp.n))), tile('First fight', clock(avg(mp.first, mp.n))),
     tile('Ended inside a dome', fpct(pct(mp.endDome, mp.n))), tile('Wildlife damage', num(avg(mp.wlMon, mp.n)), 'to the Monster, per match'), tile('Wildlife damage', num(avg(mp.wlHun, mp.n)), 'to Hunters, per match'))}
@@ -681,6 +691,14 @@ function maps() {
 
 // The ranked ladder as the account server holds it: the rating after a player's latest match (what the game itself shows), with
 // matches, wins and losses per side. It comes with every update (tools/summarize.js puts it in the totals). Without it the
+// "Most matches on <character>". Under a rank the seats counted at that rank carry their players; otherwise they come from the
+// players file, added up for the slices the filter bar selects.
+function topPlayers(id, c, name) {
+  const R = roster(), have = typeof R === 'object';
+  const who = c.players || (have ? SUMMARY.merge(sliceKeys.filter(slicePasses).map(k => R.chars[k]?.[id]).filter(Boolean)) || {} : null);
+  return `<h2>Most matches on ${esc(name)}</h2>` + (!who ? waiting('', R).replace('<h1></h1>', '') : table('cpl-' + id, [Tx('Player', p => pname(p.id), p => plink(p.id)), N('Matches', p => p.n), P('Win rate', p => pct(p.w, p.d)),
+    N('Level', p => have ? R.players[p.id]?.chars[id]?.level : null)], Object.entries(who).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, p => playerHref(p.id)));
+}
 // ladders are worked out from the match records, whose ratings are from the start of each match and so trail by one match.
 const side = l => l ? { n: l.played, w: l.wins, d: l.wins + l.losses, rating: l.rating } : { n: 0, w: 0, d: 0, rating: null };
 // (with the server's ladder, a player it does not list has no ranked standing, whatever their own game reported)
@@ -688,8 +706,9 @@ const ladderOf = p => { const l = SUM?.ladder?.[p.id]; return SUM?.ladder ? { h:
 // one rating for a player across both ladders: the better one they are placed on, else the better one so far
 const topRating = (h, m) => { const placed = [h, m].filter(x => x.n >= PLACEMENT); return Math.max(...(placed.length ? placed : [h, m]).map(x => x.rating || 0)) || null; };
 function ranked() {
-  const k = ST.rk, ids = Object.keys(SUM?.ladder || ALL.players);
-  const players = ids.map(id => ALL.players[id] || { id, chars: {}, rk: { h: side(), m: side() } }).map(p => {
+  const R = roster(); if (typeof R !== 'object') return waiting('Ranked', R);
+  const k = ST.rk, ids = Object.keys(SUM?.ladder || R.players);
+  const players = ids.map(id => R.players[id] || { id, chars: {}, rk: { h: side(), m: side() } }).map(p => {
     const { h, m } = ladderOf(p), lad = k.view === 'h' ? h : k.view === 'm' ? m : { n: h.n + m.n, w: h.w + m.w, d: h.d + m.d, rating: topRating(h, m) };
     const placed = k.view === 'o' ? h.n >= PLACEMENT || m.n >= PLACEMENT : lad.n >= PLACEMENT, pn = k.view === 'o' ? Math.max(h.n, m.n) : lad.n;   // placement is per ladder
     const mains = Object.values(p.chars).filter(c => k.view === 'o' || (charInfo(c.id).class === 'Monster') === (k.view === 'm')).sort((a, b) => b.n - a.n).slice(0, 3);
@@ -716,6 +735,7 @@ function ranked() {
 }
 
 function players() {
+  const R = roster(); if (typeof R !== 'object') return waiting('Players', R);
   const q = ST.players.q.trim().toLowerCase(), fav = p => Object.values(p.chars).sort((a, b) => b.n - a.n)[0];
   return `<h1>Players</h1><p class="sub">Everyone whose game has reported at least one match.</p>
   <div class="filters"><input type="search" data-st="players.q" placeholder="Search players" aria-label="Search players" value="${esc(ST.players.q)}">
@@ -725,7 +745,7 @@ function players() {
     N('Win rate', p => pct(p.w, p.d), p => bar(pct(p.w, p.d))), N('As Hunter', p => pct(p.h.w, p.h.d), p => p.h.n ? `${fpct(pct(p.h.w, p.h.d))} <span class="dim">(${p.h.n})</span>` : '–'),
     N('As Monster', p => pct(p.m.w, p.m.d), p => p.m.n ? `${fpct(pct(p.m.w, p.m.d))} <span class="dim">(${p.m.n})</span>` : '–'), Tx('Most played', p => charInfo(fav(p).id).name, p => chip(fav(p).id)),
     Tx('Region', p => pretty(acct(p.id)?.region)), N('Last seen', p => acct(p.id)?.t, p => day(acct(p.id)?.t))],
-    Object.values(ALL.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region)), 3, 0, false, p => playerHref(p.id))}
+    Object.values(R.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region)), 3, 0, false, p => playerHref(p.id))}
   <p class="note">Rating is the ranked rating the game reports for the player; it is blank until they have one.</p>`;
 }
 
@@ -734,7 +754,8 @@ const asMatch = r => ({ id: r.id, t: r.t, dur: r.dur, mapKey: r.map, decided: r.
   clients: { [r.role]: { Data: { LateJoiner: r.late, ChatMessagesSent: r.chat } } } });
 function player(id) {
   // p: their match totals. a: what their game says about the account. x: their own file, every match and their progression, a section per day
-  const p = ALL.players[id], a = acct(id);
+  const R = roster(); if (typeof R !== 'object') return waiting('Player', R);
+  const p = R.players[id], a = acct(id), sess = p?.sessions?.size ?? p?.sessions ?? 0;      // play sessions: a set when counted on the spot, a count in the players file
   if (!p) return `<h1>Player not found</h1><p class="sub">No matches reported under this id.</p>`;
   const got = fetchOnce('p/' + id, `${SITE_DATA}/p/${id.slice(-2)}/${encodeURIComponent(id)}.js?t=${Math.floor(Date.now() / 600000)}`, d => { const s = Object.values(d.days);
     return { matches: s.flatMap(x => x.matches).sort((x, y) => y.t - x.t), xp: s.flatMap(x => x.xp).sort((x, y) => x.t - y.t), rewards: s.flatMap(x => x.rewards).sort((x, y) => y.t - x.t),
@@ -745,7 +766,7 @@ function player(id) {
   return `<h1>${esc(pname(id))} ${a?.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
   <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
-    tile('Account level', num(p.level)), tile('Time played', hours(p.secs)), tile('Play sessions', p.sessions.size ? num(p.sessions.size) : '–', p.sessions.size ? `${dec(p.n / p.sessions.size)} matches each` : 'not recorded'), tile('Chat', dec(p.chat / p.n), 'messages per match'))}
+    tile('Account level', num(p.level)), tile('Time played', hours(p.secs)), tile('Play sessions', sess ? num(sess) : '–', sess ? `${dec(p.n / sess)} matches each` : 'not recorded'), tile('Chat', dec(p.chat / p.n), 'messages per match'))}
   <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(ladderOf(p).h, 'Hunter ladder')}${lad(ladderOf(p).m, 'Monster ladder')}</div></section>
     <section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(a?.q.dur, a?.q.ok)))}${kv('Left the queue', num(a ? a.q.n - a.q.ok : null))}
       ${kv('Queue dodges', num(a?.q.dodges))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section></div>
@@ -919,7 +940,8 @@ function matchmaking() {
 }
 
 function progression() {
-  const A = ACC, people = Object.values(ALL.players), src = Object.entries(A.rewards).map(([k, r]) => { const [why, type, ...name] = k.split('|'); return { why, type, name: name.join('|'), ...r }; });
+  const R = roster(); if (typeof R !== 'object') return waiting('Progression', R);
+  const A = ACC, people = Object.values(R.players), src = Object.entries(A.rewards).map(([k, r]) => { const [why, type, ...name] = k.split('|'); return { why, type, name: name.join('|'), ...r }; });
   // levels come with each player's own match record: the account level, and the level of the character they played
   const tracks = ['Global', ...Object.keys(C.characters).filter(c => people.some(p => p.chars[c]?.level != null))];
   const latest = people.map(p => ST.prog.track === 'Global' ? p.level : p.chars[ST.prog.track]?.level).filter(v => v != null);
