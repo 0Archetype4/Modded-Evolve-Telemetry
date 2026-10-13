@@ -7,7 +7,6 @@
   const LATEST = new Set(['level', 'rating', 'region', 'cregion', 'lang', 'audio', 'founder', 'bal']);
   const EARLIEST = new Set(['since']);              // a time: the earlier one wins
   const KEEP = new Set(['levels', 'keys']);         // part of what an entry is (a build's skill points, a combination's perks): identical on both sides
-  const CONCAT = new Set(['domes']);                // ponytail: every dome position is kept; bin them into a grid when the list gets heavy
   const UNION = new Set(['sessions', 'vars', 'ids']);      // sets of distinct things, stored as lists
 
   const clone = v => v == null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v));
@@ -19,7 +18,6 @@
     if (typeof a === 'number' && typeof b === 'number') return a + b;
     if (Array.isArray(a) && Array.isArray(b)) {
       if (KEEP.has(key)) return a;
-      if (CONCAT.has(key)) return a.concat(clone(b));
       if (UNION.has(key)) return [...new Set(a.concat(b))];
       const out = [];
       for (let i = 0; i < Math.max(a.length, b.length); i++) out[i] = add(a[i], b[i], key + '[]', bNewer);
