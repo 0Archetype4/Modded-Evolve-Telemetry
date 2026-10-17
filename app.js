@@ -17,6 +17,7 @@ const OFFICIAL = new Set([
   'Patch-1.0-Legacy-Map-FusionPlant',   // switched 2026-10-16 17:06 UTC (Patch Work Flow chat): the Fusion Plant map added, no balance change
   'Patch-1.0-Hotfix',      // switched 2026-10-17 06:57 UTC (Patch Work Flow chat): balance changes to Goliath, Gorgon, Battle Cabot, Lennox
   'Patch-1.0-Hotfix-3',    // the public manifest's version on 2026-10-17 12:05 UTC (read there directly)
+  ...(window.TELEMETRY_OFFICIAL_EXTRA || window.TELEMETRY_SUMMARY?.official || []),   // and every name the public manifest has shown (tools/update.py)
 ]);
 // Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10.
 // The modded game uses 5: the launcher hands the game "ui_rp_placement_matches 5" with its build settings (launcher source
