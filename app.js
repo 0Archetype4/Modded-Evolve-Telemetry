@@ -14,6 +14,9 @@ const OFFICIAL = new Set([
   'Patch-1.0-Release',      // public game manifest version, live 2026-10-09 13:17 UTC
   'Patch-1.0-Hot-Fix-1',    // public game manifest version (client/game-manifest-stage2.json), switched 2026-10-10 09:42:07 UTC; confirmed official by the Patch Work Flow chat
   'Patch-1.0-Community-Skins-1',   // switched 2026-10-14 09:06 UTC (Patch Work Flow chat): Hot Fix 1 plus two Elder Kraken skins, no gameplay change
+  'Patch-1.0-Legacy-Map-FusionPlant',   // switched 2026-10-16 17:06 UTC (Patch Work Flow chat): the Fusion Plant map added, no balance change
+  'Patch-1.0-Hotfix',      // switched 2026-10-17 06:57 UTC (Patch Work Flow chat): balance changes to Goliath, Gorgon, Battle Cabot, Lennox
+  'Patch-1.0-Hotfix-3',    // the public manifest's version on 2026-10-17 12:05 UTC (read there directly)
 ]);
 // Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10.
 // The modded game uses 5: the launcher hands the game "ui_rp_placement_matches 5" with its build settings (launcher source
@@ -67,7 +70,9 @@ const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
 // Release names that are shown and counted as one patch. Owner, 2026-10-11 (through the Skin Creation chat): Hot Fix 1 only
 // restored two badge files and changed no gameplay value, so it and the Release are one "Patch 1.0". Every record keeps its own
 // release name in the archive, so taking a line out of here splits them again at the next recount.
-const PATCH_OF = { 'Patch-1.0-Release': 'Patch 1.0', 'Patch-1.0-Hot-Fix-1': 'Patch 1.0', 'Patch-1.0-Community-Skins-1': 'Patch 1.0' };
+const PATCH_OF = { 'Patch-1.0-Release': 'Patch 1.0', 'Patch-1.0-Hot-Fix-1': 'Patch 1.0', 'Patch-1.0-Community-Skins-1': 'Patch 1.0', 'Patch-1.0-Legacy-Map-FusionPlant': 'Patch 1.0',
+  // balance changed from here on: kept apart, so numbers before and after can be compared
+  'Patch-1.0-Hotfix': 'Patch 1.0 Hotfix', 'Patch-1.0-Hotfix-3': 'Patch 1.0 Hotfix 3' };
 const ver = e => { const c = e.BaseHeader?.Context; return PATCH_OF[c] || (c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e)); };
 const pretty = s => String(s ?? '').replace(/^(ONLINE_REGION_|CLASSIFICATION_REGION_|ROUND_END_REASON_|eLSR?_)/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
   .toLowerCase().replace(/^./, c => c.toUpperCase());
