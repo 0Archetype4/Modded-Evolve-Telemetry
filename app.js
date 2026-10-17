@@ -71,8 +71,9 @@ const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
 // restored two badge files and changed no gameplay value, so it and the Release are one "Patch 1.0". Every record keeps its own
 // release name in the archive, so taking a line out of here splits them again at the next recount.
 const PATCH_OF = { 'Patch-1.0-Release': 'Patch 1.0', 'Patch-1.0-Hot-Fix-1': 'Patch 1.0', 'Patch-1.0-Community-Skins-1': 'Patch 1.0', 'Patch-1.0-Legacy-Map-FusionPlant': 'Patch 1.0',
-  // balance changed from here on: kept apart, so numbers before and after can be compared
-  'Patch-1.0-Hotfix': 'Patch 1.0 Hotfix', 'Patch-1.0-Hotfix-3': 'Patch 1.0 Hotfix 3' };
+  // balance changed from here on: one patch of its own after Patch 1.0 (owner, 2026-10-17: "combine the two hot fixes into
+  // their own patch after patch 1.0 as their own category"), so numbers before and after can be compared
+  'Patch-1.0-Hotfix': 'Patch 1.0 Hotfix', 'Patch-1.0-Hotfix-3': 'Patch 1.0 Hotfix' };
 const ver = e => { const c = e.BaseHeader?.Context; return PATCH_OF[c] || (c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e)); };
 const pretty = s => String(s ?? '').replace(/^(ONLINE_REGION_|CLASSIFICATION_REGION_|ROUND_END_REASON_|eLSR?_)/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
   .toLowerCase().replace(/^./, c => c.toUpperCase());
