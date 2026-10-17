@@ -75,7 +75,8 @@ const PATCH_OF = { 'Patch-1.0-Release': 'Patch 1.0', 'Patch-1.0-Hot-Fix-1': 'Pat
   // balance changed from here on: one patch of its own after Patch 1.0 (owner, 2026-10-17: "combine the two hot fixes into
   // their own patch after patch 1.0 as their own category"), so numbers before and after can be compared
   'Patch-1.0-Hotfix': 'Patch 1.0 Hotfix', 'Patch-1.0-Hotfix-3': 'Patch 1.0 Hotfix' };
-const ver = e => { const c = e.BaseHeader?.Context; return PATCH_OF[c] || (c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e)); };
+// every Patch 1.0 hotfix build, now and later (Hotfix, Hotfix-3, Hotfix-4 ...), is one patch: "Patch 1.0 Hotfix" (owner, 2026-10-17)
+const ver = e => { const c = e.BaseHeader?.Context; return PATCH_OF[c] || (/^Patch-1\.0-Hotfix/i.test(c || '') ? 'Patch 1.0 Hotfix' : c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e)); };
 const pretty = s => String(s ?? '').replace(/^(ONLINE_REGION_|CLASSIFICATION_REGION_|ROUND_END_REASON_|eLSR?_)/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
   .toLowerCase().replace(/^./, c => c.toUpperCase());
 // the names the site uses for the game's match types and modes (owner's wording: Ranked, Arcade, Custom).
