@@ -17,6 +17,9 @@ const OFFICIAL = new Set([
   'Patch-1.0-Legacy-Map-FusionPlant',   // switched 2026-10-16 17:06 UTC (Patch Work Flow chat): the Fusion Plant map added, no balance change
   'Patch-1.0-Hotfix',      // switched 2026-10-17 06:57 UTC (Patch Work Flow chat): balance changes to Goliath, Gorgon, Battle Cabot, Lennox
   'Patch-1.0-Hotfix-3',    // the public manifest's version on 2026-10-17 12:05 UTC (read there directly)
+  'Patch-1.1',             // public 2026-11-06 18:27 UTC (Patch Work Flow chat): Armory, Quick Play is Hunt and Arena only, Rescue in Custom, balance changes
+  'Patch-1.1-Release',     // the public manifest's name for Patch 1.1 from 2026-11-06 about 20:30 UTC
+  'Patch-1.1-Release-2026-11-06',   // that release renamed for a few minutes on 2026-11-07 so its update could reuse the name (Patch Work Flow chat)
   ...(window.TELEMETRY_OFFICIAL_EXTRA || window.TELEMETRY_SUMMARY?.official || []),   // and every name the public manifest has shown (tools/update.py)
 ]);
 // Ranked: a player is placed on a ladder (Hunter or Monster) after this many ranked matches on it. The original game used 10.
@@ -74,7 +77,10 @@ const build = e => `${e.BaseHeader?.BuildNumber}.${e.BaseHeader?.Micropatch}`;
 const PATCH_OF = { 'Patch-1.0-Release': 'Patch 1.0', 'Patch-1.0-Hot-Fix-1': 'Patch 1.0', 'Patch-1.0-Community-Skins-1': 'Patch 1.0', 'Patch-1.0-Legacy-Map-FusionPlant': 'Patch 1.0',
   // balance changed from here on: one patch of its own after Patch 1.0 (owner, 2026-10-17: "combine the two hot fixes into
   // their own patch after patch 1.0 as their own category"), so numbers before and after can be compared
-  'Patch-1.0-Hotfix': 'Patch 1.0 Hotfix', 'Patch-1.0-Hotfix-3': 'Patch 1.0 Hotfix' };
+  'Patch-1.0-Hotfix': 'Patch 1.0 Hotfix', 'Patch-1.0-Hotfix-3': 'Patch 1.0 Hotfix',
+  // Patch 1.1 is one patch whatever name its release carried (owner, 2026-11-06, through the Patch Work Flow chat: "make sure
+  // telemetry will follow patch 1.1 as a new section"; the update of 2026-11-07 stays inside it)
+  'Patch-1.1': 'Patch 1.1', 'Patch-1.1-Release': 'Patch 1.1', 'Patch-1.1-Release-2026-11-06': 'Patch 1.1' };
 // every Patch 1.0 hotfix build, now and later (Hotfix, Hotfix-3, Hotfix-4 ...), is one patch: "Patch 1.0 Hotfix" (owner, 2026-10-17)
 const ver = e => { const c = e.BaseHeader?.Context; return PATCH_OF[c] || (/^Patch-1\.0-Hotfix/i.test(c || '') ? 'Patch 1.0 Hotfix' : c ? 'Patch ' + c.replace(/^patch[-_ ]?/i, '') : 'Build ' + build(e)); };
 const pretty = s => String(s ?? '').replace(/^(ONLINE_REGION_|CLASSIFICATION_REGION_|ROUND_END_REASON_|eLSR?_)/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
