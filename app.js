@@ -30,6 +30,12 @@ const OFFICIAL = new Set([
 const PLACEMENT = 5;
 // the invented sample, and the private local preview, show everything they are given
 const SHOW_ALL = !!window.TELEMETRY_SAMPLE || ['localhost', '127.0.0.1'].includes(location.hostname) && !/[?&]official=1/.test(location.search);
+// The public site and the developer view (Roger, 2026-10-18: "info that backend devs need should not be shown publicly"). The
+// public site shows the competitive numbers; queue internals, progression, the store, dialogue, conduct and record bookkeeping
+// are the developer view only: this folder served on localhost, reading the NAS's own full totals (data/totals.js). Nothing for
+// the developer view is uploaded. ?official=1 on localhost shows the public site, and so does the public totals' core wherever it is
+// loaded (tools/publish.py --preview).
+const PUBLIC = !['localhost', '127.0.0.1'].includes(location.hostname) || /[?&]official=1/.test(location.search) || !!window.TELEMETRY_SUMMARY?.split;
 const RAW = window.TELEMETRY_EVENTS || [];
 const counted = e => e.BaseHeader?.Context !== 'aisoak' && (SHOW_ALL || OFFICIAL.has(e.BaseHeader?.Context));
 const EVENTS = RAW.filter(counted);
@@ -218,7 +224,7 @@ for (const [k, v] of Object.entries(SUM?.items || {})) ITEMS[k] ||= v;      // w
 const optionsOf = (i, f) => SUM ? [...new Set(sliceKeys.map(k => k.split('|')[i]))].sort() : uniq(f);
 // solo matches are left out by default, unless they are all there is
 const ST = { fl: { v: '', mode: '', type: '', rank: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
-  players: { q: '', region: '', all: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
+  players: { q: '', region: '', all: '', list: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
 const passes = m => (!ST.fl.v || m.v === ST.fl.v) && (!ST.fl.mode || m.hdr.GameMode === ST.fl.mode) && (!ST.fl.type || m.hdr.MatchType === ST.fl.type) && (ST.fl.solo || m.hdr.Multiplayer);
 const uniq = f => [...new Set(MATCHES.map(f))].sort();
 const select = (path, opts, cur, all) => `<select data-st="${path}">${all ? `<option value="">${all}</option>` : ''}${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o];
@@ -364,16 +370,43 @@ function totals(filtered) {
   const parts = sliceKeys.filter(k => !filtered || slicePasses(k)).map(k => SUM.slices[k]);
   const T = parts.length ? SUMMARY.merge(parts) : SUMMARY.plain(compute([]));
   T.matches = recent.matches;                 // the match objects themselves exist only for what this page loaded
-  for (const l of Object.values(T.lines)) l.vars = new Set(l.vars);
+  for (const l of Object.values(T.lines || {})) l.vars = new Set(l.vars);
   return T;
 }
 // (window.TELEMETRY_JOB: tools/summarize.js runs this file to count, and calls compute() and account() itself)
-const ALL = window.TELEMETRY_JOB ? null : totals(false);     // players, ranked and the unfiltered pages
+let ALL = window.TELEMETRY_JOB ? null : totals(false);       // players, ranked and the unfiltered pages
 let S = window.TELEMETRY_JOB ? null : totals(true);          // the stats pages, following the filter bar
+/* The public site's totals come in parts (tools/summarize.js, publicFiles): a small core every visitor loads (each character's
+   headline numbers, matchups, maps, the ladder), then, only when a page needs them, one character's full numbers ("char/<id>"),
+   the rank split ("ranks"), perks and combinations ("perks") and the dome grids ("grids"). part() says whether one is here
+   ('ok', 'loading' or 'missing') and fetches it the first time. The developer view loads the whole totals file, so for it
+   every part is always here. */
+const CHAR_PLAYERS = {}, CHAR_LEVELS = {};      // from a character's part: char id -> slice -> its players (5 or more matches on it), and their level
+const part = name => !SUM?.split ? 'ok' : fetchOnce('part/' + name, `${SITE_DATA}/${name}.js?b=${encodeURIComponent(SUM.built)}`, d => { joinPart(d); return 'ok'; });
+function joinPart(d) {
+  for (const [k, p] of Object.entries(d.slices || {})) {
+    const s = SUM.slices[k]; if (!s) continue;
+    Object.assign(s.chars, p.chars);         // a character's full numbers take the place of its headline ones
+    // a rank's characters: the headline ones from "ranks", the full ones from a character's part; full never gives way to headline
+    for (const [rk, chars] of Object.entries(p.ranks || {})) { const r = cell(s.ranks ||= {}, rk, () => ({}));
+      for (const [id, c] of Object.entries(chars)) if (!r[id] || r[id].light) r[id] = c; }
+    if (p.perks) s.perks = p.perks;
+    if (p.combos) s.combos = p.combos;
+    for (const [key, grid] of Object.entries(p.grids || {})) if (s.maps[key]) s.maps[key].grid = grid;
+  }
+  Object.assign(CHAR_PLAYERS, d.players); Object.assign(CHAR_LEVELS, d.levels);
+  ALL = totals(false); S = totals(true);
+}
+// what a page shows while a part it needs is on its way
+const partWait = (got, what) => `<p class="dim">${got === 'missing' ? `The ${what} could not be loaded. Refresh in a minute.` : `Loading the ${what}…`}</p>`;
 // Per-player rows are not in the stored totals, which every visitor downloads: they grow with every new player. The all-time table
 // of players, and who played each character, sit in a file of their own beside the match files (tools/summarize.js writes it),
 // fetched the first time a page needs it. roster() gives { players, chars }, or 'loading' / 'missing' until then.
-const roster = () => SUM ? fetchOnce('players', `${SITE_DATA}/players.js?t=${Math.floor(Date.now() / 600000)}`) : { players: ALL.players };
+// The public site's players file (players2.js) holds what its pages show: matches, play time, ladders, characters and the time of
+// their newest match (`t`). Nothing from the account table (region, sign-in times) and no conduct.
+// The developer view reads the whole table, conduct included, from the NAS's own folder (archive/dev, never uploaded).
+const roster = () => !SUM ? { players: ALL.players } : SUM.split ? fetchOnce('players', `${SITE_DATA}/players2.js?b=${encodeURIComponent(SUM.built)}`)
+  : fetchOnce('players', `${DEV_DATA}/players.js?t=${Math.floor(Date.now() / 600000)}`);
 const waiting = (title, R) => `<h1>${title}</h1><p class="dim">${R === 'missing' ? 'The players list could not be loaded.' : 'Loading the players list…'}</p>`;
 
 /* ---------- account totals ----------
@@ -381,6 +414,13 @@ const waiting = (title, R) => `<h1>${title}</h1><p class="dim">${R === 'missing'
    match: queue attempts, XP, rewards, challenges, purchases, sign-ins, kicks, and what each player's game says about their account.
    Like compute(), it only counts and sums, so tools/summarize.js works it out a day at a time and adds the days up (summary.js).
    starts: the start records of matches that never sent an end record. */
+// Queue times that found a match, counted in 15-second steps up to an hour (the last step: an hour or more). The mean is pulled far
+// out by a few attempts left running for hours (a Ranked mean of over 100 hours on 2026-10-18), so the pages show the median.
+const QSTEP = 15, QSTEPS = 241, qhist = () => Array(QSTEPS).fill(0), qbin = s => Math.max(0, Math.min(QSTEPS - 1, Math.floor((s || 0) / QSTEP)));
+// the median of a queue histogram, in seconds (the middle of its step), or null when it holds nothing
+const qmedian = (h, step = QSTEP) => { const n = sumv(h); if (!n) return null; let a = 0; for (let i = 0; i < h.length; i++) if ((a += h[i] || 0) >= n / 2) return (i + .5) * step; return null; };
+// the same per hour of the day (UTC), coarser: minutes up to an hour
+const HSTEP = 60, HSTEPS = 61, hhist = () => Array(HSTEPS).fill(0), hbin = s => Math.max(0, Math.min(HSTEPS - 1, Math.floor((s || 0) / HSTEP)));
 function account(events, starts) {
   const A = { records: {}, hdr: {}, vers: {}, mm: {}, xp: { n: 0, gain: 0, ups: 0 }, rewards: {}, chall: {}, challN: 0, store: { n: 0, ok: 0, paid: 0, items: {}, by: {} },
     logins: 0, late: 0, kicks: {}, daily: {}, sessions: new Set(), players: {}, unfin: { n: 0, by: {} } };
@@ -417,10 +457,10 @@ function account(events, starts) {
         const x = cell(cell(s.by, dim, () => ({})), v ?? '', () => ({ n: 0, ok: 0 })); x.n++; x.ok += ok; } }
     else if (kind === 'ClientMatchmakingRecord') {       // one queue attempt; it reached a match when it carries a game session id
       const ok = +d.GameSessionId ? 1 : 0, dur = b.Duration || 0, h = new Date(t).getUTCHours();
-      const q = cell(A.mm, [ver(e), d.GameMode, d.MatchType === 'Ranked' ? 'R' : 'N'].join('|'), () => ({ n: 0, ok: 0, dur: 0, dodges: 0, team: {}, type: {}, hourN: Array(24).fill(0), hourDur: Array(24).fill(0), stages: {}, reasons: {} }));
+      const q = cell(A.mm, [ver(e), d.GameMode, d.MatchType === 'Ranked' ? 'R' : 'N'].join('|'), () => ({ n: 0, ok: 0, dur: 0, dodges: 0, team: {}, type: {}, hourN: Array(24).fill(0), hourDur: Array(24).fill(0), hist: qhist(), hourHist: Array.from({ length: 24 }, hhist), stages: {}, reasons: {} }));
       q.n++; q.dodges += d.QueueDodger ? 1 : 0; p.q.n++; p.q.dodges += d.QueueDodger ? 1 : 0;
-      if (ok) { q.ok++; q.dur += dur; q.hourN[h]++; q.hourDur[h] += dur; p.q.ok++; p.q.dur += dur;
-        for (const [o, k] of [[q.team, d.PlayerTeam], [q.type, d.MatchType]]) { const x = cell(o, k, () => ({ n: 0, dur: 0 })); x.n++; x.dur += dur; } }
+      if (ok) { q.ok++; q.dur += dur; q.hourN[h]++; q.hourDur[h] += dur; q.hist[qbin(dur)]++; q.hourHist[h][hbin(dur)]++; p.q.ok++; p.q.dur += dur;
+        for (const [o, k] of [[q.team, d.PlayerTeam], [q.type, d.MatchType]]) { const x = cell(o, k, () => ({ n: 0, dur: 0, hist: qhist() })); x.n++; x.dur += dur; x.hist[qbin(dur)]++; } }
       for (const ev of d.Events || []) {
         if (ev.Type === 'LeftQueue') { const r = cell(q.reasons, ev.Data, () => ({ n: 0, at: 0 })); r.n++; r.at += ev.TimeStamp || 0; continue; }
         const s = cell(q.stages, ev.Type === 'LobbyState' ? ev.Data : ev.Type, () => ({ n: 0, at: 0, pl: 0, lobby: ev.Type === 'LobbyState' })); s.n++; s.at += ev.TimeStamp || 0; s.pl += ev.Val || 0; } }
@@ -444,7 +484,11 @@ function ledger(events) {
 }
 // On the page: the stored account totals, or, without them, the loaded records counted here.
 const ACC = SUM?.account || (window.SUMMARY ? SUMMARY.plain(account(EVENTS, UNFINISHED.map(r => r.start))) : null);
-const acct = id => ACC.players[id];
+// what a player's game says about their account (region, languages, sign-in times, queueing). The developer view's only: the public
+// site has no account table.
+const acct = id => ACC.players?.[id];
+// the online regions players are in (the public totals carry only a count per region)
+const regionList = () => [...new Set(ACC.players ? Object.values(ACC.players).map(p => p.region) : Object.keys(ACC.regions || {}))].sort();
 // A character's own kit in a patch: the one most of that character's seats in the patch were recorded with, over every mode
 // and match type (so a filter that leaves a handful of matches cannot make a leftover kit look like the usual one).
 function ownKit(id) {
@@ -473,7 +517,8 @@ function rankChars() {
   return cache[sel] || (cache[sel] = SUMMARY.merge(Object.entries(S.ranks || {}).filter(([k]) => inRank(k, sel)).map(([, chars]) => chars)) || {});
 }
 const rankSeats = k => Object.values(S.ranks[k]).reduce((a, c) => a + c.n, 0);
-const rankBar = () => { const list = rankList(), tiers = ['bronze', 'silver', 'gold'].filter(t => list.some(k => inRank(k, 'tier:' + t)));
+const rankBar = () => { if (part('ranks') !== 'ok') return '';      // the Rank filter appears once the rank split is here
+  const list = rankList(), tiers = ['bronze', 'silver', 'gold'].filter(t => list.some(k => inRank(k, 'tier:' + t)));
   return !list.length ? '' : `<div class="filters"><label>Rank ${select('fl.rank', [...tiers.map(t => ['tier:' + t, `${t[0].toUpperCase() + t.slice(1)} (all) · ${num(list.filter(k => inRank(k, 'tier:' + t)).reduce((a, k) => a + rankSeats(k), 0))}`]),
     ...list.map(k => [k, `${k} · ${num(rankSeats(k))}`])], ST.fl.rank, 'All ranks, all matches')}</label></div>
   ${ST.fl.rank ? `<p class="note">Rank filter: ranked matches only. Each player is counted under the division of the rating they had going into the match, so matches played during placement are included; a player's first ranked match has no rating yet. The number beside each rank is how many players' matches it holds. Pick rate is the share of that class's players at this rank.</p>` : ''}`; };
@@ -523,7 +568,7 @@ const endsTable = (id, ends, total) => table(id, [Tx('Ending', e => e.k, e => { 
 const HEAT = [['all', 'All fights'], ['caught', 'Monster caught'], ['dmg', 'Monster damage'], ['downs', 'Hunters down'], ['s1', 'Stage 1'], ['s2', 'Stage 2'], ['s3', 'Stage 3'], ['move', 'Movement'], ['fps', 'Frame rate']];
 function heat(mapKey, domes, view = 'all', numbered = false) {
   const info = mapInfo(mapKey), b = mapBounds(mapKey);
-  if (view === 'move' || view === 'fps') return `<div class="heat">${img(info.minimap, '', info.name)}<div class="none">No data. The game builds this record but never switches it on (${num(ACC.records.ClientProfilingRecord?.n || 0)} received).</div></div>`;
+  if (view === 'move' || view === 'fps') return `<div class="heat">${img(info.minimap, '', info.name)}<div class="none">No data. The game builds this record but never switches it on (${num(ACC.records?.ClientProfilingRecord?.n || 0)} received).</div></div>`;
   // one match: its own domes, numbered. The totals: the grid compute() counted, a cell the brighter the more it holds of what the view shows.
   const col = { all: 0, caught: 1, dmg: 2, downs: 3, s1: 4, s2: 5, s3: 6 }[view];
   const pts = numbered ? domes : Object.entries(domes).filter(([k, g]) => g[col] && k !== 'off').map(([k, g]) => { const [i, j] = k.split('|').map(Number); return { i, j, wt: g[col] }; });
@@ -535,11 +580,12 @@ function heat(mapKey, domes, view = 'all', numbered = false) {
 }
 
 /* ---------- pages ---------- */
+// a fourth entry `true`: the developer view only
 const SECTIONS = [['characters', 'Characters', 'Who gets picked and who wins'], ['matchups', 'Matchups', 'Who wins versus who'], ['perks', 'Perks', 'Which perks are picked the most, and which are not'],
   ['maps', 'Maps', 'Which side wins on each map, and where the fights happen'], ['ranked', 'Ranked', 'The ranked leaderboard'], ['players', 'Players', 'Look up any player'],
-  ['matches', 'Matches', 'Every match played, day by day'], ['matchmaking', 'Matchmaking', 'How long queues take and how even matches are'], ['progression', 'Progression', 'XP, levels, keys and challenges'], ['store', 'Store', 'What gets bought'],
-  ['dialogue', 'Dialogue', 'Which voice lines play the most'], ['community', 'Community', 'Who is playing, where and when'], ['fairplay', 'Fair play', 'Leavers, dodgers and kicks'],
-  ['about', 'About the data', 'Where the numbers come from']];
+  ['matches', 'Matches', 'Every match played, day by day'], ['matchmaking', 'Matchmaking', 'How long queues take, how even matches are, and leavers'], ['progression', 'Progression', 'XP, levels, keys and challenges', true], ['store', 'Store', 'What gets bought', true],
+  ['dialogue', 'Dialogue', 'Which voice lines play the most', true], ['community', 'Community', 'Who is playing, where and when'], ['fairplay', 'Fair play', 'Leavers, dodgers and kicks', true],
+  ['about', 'About the data', 'Where the numbers come from']].filter(s => !PUBLIC || !s[3]);
 document.getElementById('nav').innerHTML = `<a href="#/" data-r="">Overview</a>` + SECTIONS.map(s => `<a href="#/${s[0]}" data-r="${s[0]}">${s[1]}</a>`).join('');
 
 function overview() {
@@ -566,14 +612,16 @@ function characters() {
 }
 
 function character(id) {
-  const R = ST.fl.rank, chars = R ? rankChars() : S.chars, c = chars[id], info = charInfo(id);
+  // with a rank chosen, the pick rate needs every character at that rank too (the rank split)
+  const info = charInfo(id), got = [part('char/' + id), ST.fl.rank ? part('ranks') : 'ok'].find(g => g !== 'ok') || 'ok';
+  if (got !== 'ok') return `<h1>${esc(info.name)}</h1>${partWait(got, 'numbers for ' + esc(info.name))}`;
+  const R = ST.fl.rank, chars = R ? rankChars() : S.chars, c = chars[id];
   if (!c) return `<h1>${esc(info.name)}</h1>${filterBar()}${rankBar()}<p class="sub">No matches recorded for this character with these filters.</p>`;
   const classSeats = Object.values(chars).reduce((a, x) => a + (x.role === c.role ? x.n : 0), 0);
   // damage, healing, weapons, abilities and sources: only seats recorded with this character's own kit; each slot is named after their own item
   const kit = ownNumbers(id, R), named = (label, key) => slotItem(id, label) || itemInfo(key);
   const mon = c.role === 'Monster', items = Object.values(kit.items).map(it => ({ ...it, info: named(it.label, it.key) })), total = items.reduce((a, it) => a + it.dmg, 0);
   const leftOut = c.n - kit.n ? `<p class="note">Damage, healing, weapon and ability numbers on this page come from ${num(kit.n)} of these ${num(c.n)} matches. The other ${num(c.n - kit.n)} are left out because the game's record of them cannot be relied on: the match came right after one its host had started and never finished (the game can carry weapon data over from it), or the record lists weapons that are not this character's own (in the tutorial, a cut-down kit), or it holds an impossible number. They still count for matches, pick rate and win rate.</p>` : '';
-  const lines = Object.values(S.lines).filter(l => l.speaker === id);
   // the four ability slots, for the skill-point tables: the item most often seen in each slot
   const inSlot = j => Object.values(kit.items).filter(it => it.label === 'Ability' + j).sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))[0];
   const abil = [1, 2, 3, 4].map(j => inSlot(j) ? named('Ability' + j, inSlot(j).key) : slotItem(id, 'Ability' + j) || { name: 'Ability ' + j, icon: '' });
@@ -631,7 +679,6 @@ function character(id) {
     <section><h2>Perk combinations</h2>${table('cc-' + id, [Tx('Perks', x => x.keys.join(), x => perkIcons(x.keys) + ' <span class="dim">' + x.keys.map(k => esc(perkInfo(k).name)).join(', ') + '</span>'), N('Matches', x => x.n), P('Win rate', x => pct(x.w, x.d))], Object.values(c.combos), 1, 8)}</section>
     <section><h2>Skins used</h2>${table('skin-' + id, [Tx('Skin', s => s.k), N('Matches', s => s.n), N('Share', s => pct(s.n, sumv(c.skins)), s => bar(pct(s.n, sumv(c.skins))))], Object.entries(c.skins).map(([k, n]) => ({ k, n })), 1)}</section>
   </div>
-  ${lines.length ? `<h2>Most-heard voice lines</h2>${table('cl-' + id, [Tx('Line', l => l.response), Tx('Triggered by', trigger), N('Times played', l => l.n), Tx('', l => '', l => play(lineUrl(l.speaker, l.response)))], lines, 2, 10)}` : ''}
   ${topPlayers(id, c, info.name)}`;
 }
 
@@ -661,9 +708,11 @@ function perks() {
   const combosTable = (id, title, rows, rate) => `<h2>${title}</h2>` + table(id, [Tx('Combination', x => x.keys.join(), comboCell), P('Pick rate', rate), N('Matches', x => x.n),
     P('Win rate', x => pct(x.w, x.d))], rows, 1, k.allc ? 0 : 10) + more(rows.length, 'combinations', 'allc');
   let body;
-  if (team === 'char') {
+  const ids = ROLES.flatMap(r => Object.keys(C.characters).filter(x => C.characters[x].class === r)), id = C.characters[k.char] ? k.char : ids[0];
+  const got = part(team === 'char' ? 'char/' + id : 'perks');
+  if (got !== 'ok') body = partWait(got, team === 'char' ? 'perks for ' + esc(charInfo(id).name) : 'perks');
+  else if (team === 'char') {
     // one character's perks: every number here is measured against that character's own matches
-    const ids = ROLES.flatMap(r => Object.keys(C.characters).filter(x => C.characters[x].class === r)), id = C.characters[k.char] ? k.char : ids[0];
     const c = S.chars[id], info = charInfo(id), perkCell = p => `${img(perkInfo(p.key).icon, 'perk')} ${esc(perkInfo(p.key).name)}`;
     const rows = Object.values(c?.perks || {}).filter(p => !k.tier || perkInfo(p.key).tier === k.tier), combos = Object.values(c?.combos || {});
     body = `<div class="filters"><label>Character ${select('perks.char', ids.map(x => [x, `${charInfo(x).class} · ${charInfo(x).name}`]), id)}</label>
@@ -688,17 +737,19 @@ function perks() {
 }
 
 function maps() {
-  const list = Object.values(S.maps).sort((a, b) => b.n - a.n), mp = S.maps[ST.maps.key] || list[0];
+  const list = Object.values(S.maps).sort((a, b) => b.n - a.n), mp = S.maps[ST.maps.key] || list[0], got = part('grids');
   if (!mp) return `<h1>Maps</h1>${filterBar()}<p class="sub">No matches with these filters.</p>`;
+  // the movement and frame-rate views stay empty (the game never switches their record on): the developer view only
+  const views = HEAT.filter(v => !PUBLIC || !['move', 'fps'].includes(v[0])), view = views.some(v => v[0] === ST.maps.view) ? ST.maps.view : 'all';
   return `<h1>Maps</h1><p class="sub">Which side wins on each map, and where the fights happen. The heat map shows where domes went up: Hunters throw one where they catch the Monster.</p>${filterBar()}
   ${tabs('maps.key', list.map(m => [m.key, esc(mapInfo(m.key).name)]), mp.key)}
   <h2>Fight heatmap</h2>
-  <div class="heatwrap">${heat(mp.key, mp.grid, ST.maps.view)}<div>${tabs('maps.view', HEAT, ST.maps.view)}
+  ${got !== 'ok' ? partWait(got, 'heat map') : `<div class="heatwrap">${heat(mp.key, mp.grid, view)}<div>${tabs('maps.view', views, view)}
     <div class="panel">${kv('Domes thrown', num(mp.throws))}${kv('Caught the Monster', `${num(mp.caught)} · ${fpct(pct(mp.caught, mp.throws))}`)}${kv('Monster damage in domes', num(gsum(mp, 2)))}
       ${kv('Hunters downed in domes', num(gsum(mp, 3)))}
       ${HUNTERS.map(r => kv(`${r} inside when it went up`, fpct(pct(mp.inside[r], gsum(mp, 0))))).join('')}</div>
     <p class="note">Dome positions are grouped into a ${GRID} by ${GRID} grid over the map; a brighter cell holds more.</p>
-    <p class="note">Positions are placed with each map's own minimap bounds from the game files.</p></div></div>
+    <p class="note">Positions are placed with each map's own minimap bounds from the game files.</p></div></div>`}
   <h2>Map numbers</h2>
   ${tiles(tile('Matches', num(mp.n)), tile('Hunters win', fpct(pct(mp.w, mp.d))), tile('Average match', clock(avg(mp.dur, mp.n))), tile('First fight', clock(avg(mp.first, mp.n))),
     tile('Ended inside a dome', fpct(pct(mp.endDome, mp.n))), tile('Wildlife damage', num(avg(mp.wlMon, mp.n)), 'to the Monster, per match'), tile('Wildlife damage', num(avg(mp.wlHun, mp.n)), 'to Hunters, per match'))}
@@ -711,11 +762,17 @@ function maps() {
 // matches, wins and losses per side. It comes with every update (tools/summarize.js puts it in the totals). Without it the
 // "Most matches on <character>". Under a rank the seats counted at that rank carry their players; otherwise they come from the
 // players file, added up for the slices the filter bar selects.
+// Only players with at least TOP_MIN matches on the character under the filters are listed (Roger, 2026-10-18). On the public site
+// the character's own part carries its players; the developer view adds them up from the players file.
+const TOP_MIN = 5;
 function topPlayers(id, c, name) {
-  const R = roster(), have = typeof R === 'object';
-  const who = c.players || (have ? SUMMARY.merge(sliceKeys.filter(slicePasses).map(k => R.chars[k]?.[id]).filter(Boolean)) || {} : null);
+  const split = SUM?.split, R = split ? null : roster(), have = split || typeof R === 'object';
+  const who = c.players || (!have ? null : split ? SUMMARY.merge(sliceKeys.filter(slicePasses).map(k => CHAR_PLAYERS[id]?.[k]).filter(Boolean)) || {}
+    : SUMMARY.merge(sliceKeys.filter(slicePasses).map(k => R.chars[k]?.[id]).filter(Boolean)) || {});
+  const level = pid => split ? CHAR_LEVELS[id]?.[pid] : R.players[pid]?.chars[id]?.level;
   return `<h2>Most matches on ${esc(name)}</h2>` + (!who ? waiting('', R).replace('<h1></h1>', '') : table('cpl-' + id, [Tx('Player', p => pname(p.id), p => plink(p.id)), N('Matches', p => p.n), P('Win rate', p => pct(p.w, p.d)),
-    N('Level', p => have ? R.players[p.id]?.chars[id]?.level : null)], Object.entries(who).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, p => playerHref(p.id)));
+    N('Level', p => level(p.id))], Object.entries(who).filter(([, v]) => v.n >= TOP_MIN).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, p => playerHref(p.id))
+    + `<p class="note">Players with at least ${TOP_MIN} matches on ${esc(name)} under these filters.</p>`);
 }
 // ladders are worked out from the match records, whose ratings are from the start of each match and so trail by one match.
 const side = l => l ? { n: l.played, w: l.wins, d: l.wins + l.losses, rating: l.rating } : { n: 0, w: 0, d: 0, rating: null };
@@ -739,7 +796,7 @@ function ranked() {
   return `<h1>Ranked</h1><p class="sub">The ranked leaderboard, from ranked matches only. Hunters and Monsters have separate ladders; a player is placed after ${PLACEMENT} matches on a ladder.</p>
   ${tabs('rk.view', [['o', 'Overall'], ['h', 'Hunter'], ['m', 'Monster']], k.view)}
   <div class="filters">${tabs('rk.tier', [['', 'All'], tierBtn('gold'), tierBtn('silver'), tierBtn('bronze')], k.tier).replace('class="tabs"', 'class="tabs" style="margin:0"')}
-    ${select('rk.cls', ROLES, k.cls, 'All classes')}${select('rk.region', [...new Set(Object.values(ACC.players).map(p => p.region))].sort().map(r => [r, pretty(r)]), k.region, 'All regions')}
+    ${select('rk.cls', ROLES, k.cls, 'All classes')}${PUBLIC ? '' : select('rk.region', regionList().map(r => [r, pretty(r)]), k.region, 'All regions')}
     <input type="search" data-st="rk.q" placeholder="Search player" aria-label="Search player" value="${esc(k.q)}">${select('rk.sort', [['rating', 'Sort: rating'], ['winrate', 'Sort: win rate'], ['wins', 'Sort: wins']], k.sort)}</div>
   <div class="podium">${players.slice(0, 3).map((p, i) => `<div><div class="rk" style="color:${['#ffd700', '#cfd2d4', '#cd7f3a'][i]}">#${i + 1}</div>${p.div ? img(p.div.icon, '', p.div.name) : ''}
     <div><b>${plink(p.id)}</b></div><div class="wr">${fpct(pct(p.w, p.d))}</div><div class="dim">${p.w}-${p.d - p.w} · ${p.div ? esc(p.div.name) : 'In placement'}</div></div>`).join('')}</div>
@@ -752,18 +809,22 @@ function ranked() {
   <p class="note">${SUM?.ladder ? 'Ratings, matches, wins and losses are the game server\'s own ladder, as of the last update.' : 'Rating and division are as each player\'s game reported them at the start of their latest ranked match, so they trail the game by one match.'}</p>`;
 }
 
+const PLAYERS_SHOWN = 100;
 function players() {
   const R = roster(); if (typeof R !== 'object') return waiting('Players', R);
   const q = ST.players.q.trim().toLowerCase(), fav = p => Object.values(p.chars).sort((a, b) => b.n - a.n)[0];
-  return `<h1>Players</h1><p class="sub">Everyone whose game has reported at least one match.</p>
+  // the first PLAYERS_SHOWN rows of the current sort (drawing all of them, 18,000 and more, took seconds); a search narrows the whole table
+  const rows = Object.values(R.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region));
+  return `<h1>Players</h1><p class="sub">Everyone whose game has reported at least one match. Search for a name to find anyone.</p>
   <div class="filters"><input type="search" data-st="players.q" placeholder="Search players" aria-label="Search players" value="${esc(ST.players.q)}">
-    ${select('players.region', [...new Set(Object.values(ACC.players).map(p => p.region))].sort().map(r => [r, pretty(r)]), ST.players.region, 'All regions')}</div>
-  ${hint('Tap a player to open their profile: characters, ranked ladders, progression, challenges and latest matches.')}
-  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => topRating(ladderOf(p).h, ladderOf(p).m)), N('Matches', p => p.n),
+    ${PUBLIC ? '' : select('players.region', regionList().map(r => [r, pretty(r)]), ST.players.region, 'All regions')}</div>
+  ${hint('Tap a player to open their profile: characters, ranked ladders and latest matches.')}
+  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (!PUBLIC && acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => topRating(ladderOf(p).h, ladderOf(p).m)), N('Matches', p => p.n),
     N('Win rate', p => pct(p.w, p.d), p => bar(pct(p.w, p.d))), N('As Hunter', p => pct(p.h.w, p.h.d), p => p.h.n ? `${fpct(pct(p.h.w, p.h.d))} <span class="dim">(${p.h.n})</span>` : '–'),
     N('As Monster', p => pct(p.m.w, p.m.d), p => p.m.n ? `${fpct(pct(p.m.w, p.m.d))} <span class="dim">(${p.m.n})</span>` : '–'), Tx('Most played', p => charInfo(fav(p).id).name, p => chip(fav(p).id)),
-    Tx('Region', p => pretty(acct(p.id)?.region)), N('Last seen', p => acct(p.id)?.t, p => day(acct(p.id)?.t))],
-    Object.values(R.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region)), 3, 0, false, p => playerHref(p.id))}
+    ...(PUBLIC ? [N('Last match', p => p.t, p => day(p.t))] : [Tx('Region', p => pretty(acct(p.id)?.region)), N('Last seen', p => acct(p.id)?.t, p => day(acct(p.id)?.t))])],
+    rows, 3, ST.players.list ? 0 : PLAYERS_SHOWN, false, p => playerHref(p.id))}
+  ${rows.length > PLAYERS_SHOWN && !ST.players.list ? `<p class="note">The first ${num(PLAYERS_SHOWN)} of ${num(rows.length)} players in this order. <button data-st="players.list" data-v="1">Show all</button></p>` : ''}
   <p class="note">Rating is the ranked rating the game reports for the player; it is blank until they have one.</p>`;
 }
 
@@ -775,27 +836,33 @@ function player(id) {
   const R = roster(); if (typeof R !== 'object') return waiting('Player', R);
   const p = R.players[id], a = acct(id), sess = p?.sessions?.size ?? p?.sessions ?? 0;      // play sessions: a set when counted on the spot, a count in the players file
   if (!p) return `<h1>Player not found</h1><p class="sub">No matches reported under this id.</p>`;
-  const got = fetchOnce('p/' + id, `${SITE_DATA}/p/${id.slice(-2)}/${encodeURIComponent(id)}.js?t=${Math.floor(Date.now() / 600000)}`, d => { const s = Object.values(d.days);
-    return { matches: s.flatMap(x => x.matches).sort((x, y) => y.t - x.t), xp: s.flatMap(x => x.xp).sort((x, y) => x.t - y.t), rewards: s.flatMap(x => x.rewards).sort((x, y) => y.t - x.t),
+  const got = fetchOnce('p/' + id, `${SITE_DATA}/p/${id.slice(-2)}/${encodeURIComponent(id)}.js?t=${Math.floor(Date.now() / 600000)}`, d => ({ matches: Object.values(d.days).flatMap(x => x.matches).sort((x, y) => y.t - x.t), chars: d.chars }));
+  // the developer view: their progression, from the NAS's own folder (archive/dev/p, never uploaded)
+  const dev = PUBLIC ? null : fetchOnce('pd/' + id, `${DEV_DATA}/p/${id.slice(-2)}/${encodeURIComponent(id)}.js?t=${Math.floor(Date.now() / 600000)}`, d => { const s = Object.values(d.days);
+    return { xp: s.flatMap(x => x.xp).sort((x, y) => x.t - y.t), rewards: s.flatMap(x => x.rewards).sort((x, y) => y.t - x.t),
       chall: Object.values(s.reduce((o, x) => { for (const [name, c] of Object.entries(x.chall)) if (c.t >= (o[name]?.t || 0)) o[name] = { name, ...c }; return o; }, {})) }; });
-  const x = typeof got === 'object' ? got : { matches: [], xp: [], rewards: [], chall: [] }, gains = x.xp.slice(-30);
-  const wait = got === 'loading' ? '<p class="dim">Loading this player\'s history…</p>' : got === 'missing' ? '<p class="dim">This player\'s history could not be loaded.</p>' : '';
+  const x = typeof got === 'object' ? got : { matches: [] }, y = typeof dev === 'object' && dev ? dev : { xp: [], rewards: [], chall: [] }, gains = y.xp.slice(-30);
+  const waitFor = g => g === 'loading' ? '<p class="dim">Loading this player\'s history…</p>' : g === 'missing' ? '<p class="dim">This player\'s history could not be loaded.</p>' : '', wait = waitFor(got);
   const lad = (l, name) => { const dv = l.n >= PLACEMENT ? division(l.rating) : null; return kv(name, l.n ? `${dv ? esc(dv.name) : `In placement (${l.n}/${PLACEMENT})`} · rating ${num(l.rating)} · ${l.w}-${l.d - l.w}` : 'No ranked matches'); };
-  return `<h1>${esc(pname(id))} ${a?.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
-  <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
+  const skinOf = c => c.skin ?? Object.entries(c.skins || {}).sort((a, b) => b[1] - a[1])[0]?.[0];      // the public players file keeps only the usual skin
+  // every character they played: in the public site's players file only their mains, the whole table in their own file
+  const pchars = SUM?.split ? x.chars || {} : p.chars;
+  return `<h1>${esc(pname(id))} ${!PUBLIC && a?.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
+  <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : p.t ? `last match ${day(p.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
-    tile('Account level', num(p.level)), tile('Time played', hours(p.secs)), tile('Play sessions', sess ? num(sess) : '–', sess ? `${dec(p.n / sess)} matches each` : 'not recorded'), tile('Chat', dec(p.chat / p.n), 'messages per match'))}
+    tile('Account level', num(p.level)), tile('Time played', hours(p.secs)),
+    PUBLIC ? '' : tile('Play sessions', sess ? num(sess) : '–', sess ? `${dec(p.n / sess)} matches each` : 'not recorded'), PUBLIC ? '' : tile('Chat', dec(p.chat / p.n), 'messages per match'))}
   <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(ladderOf(p).h, 'Hunter ladder')}${lad(ladderOf(p).m, 'Monster ladder')}</div></section>
-    <section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(a?.q.dur, a?.q.ok)))}${kv('Left the queue', num(a ? a.q.n - a.q.ok : null))}
-      ${kv('Queue dodges', num(a?.q.dodges))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section></div>
+    ${PUBLIC ? '' : `<section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(a?.q.dur, a?.q.ok)))}${kv('Left the queue', num(a ? a.q.n - a.q.ok : null))}
+      ${kv('Queue dodges', num(a?.q.dodges))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section>`}</div>
   <h2>Characters</h2>${table('pc-' + id, [Tx('Character', c => charInfo(c.id).name, c => chip(c.id)), Tx('Class', c => charInfo(c.id).class, c => classCell(charInfo(c.id).class)),
-    N('Matches', c => c.n), N('Win rate', c => pct(c.w, c.d), c => bar(pct(c.w, c.d))), N('Level', c => c.level), Tx('Usual skin', c => Object.entries(c.skins).sort((a, b) => b[1] - a[1])[0]?.[0]),
-    N('Damage dealt', c => avg(c.dmg, c.dn ?? c.n)), N('Damage taken', c => avg(c.taken, c.dn ?? c.n))], Object.values(p.chars), 2, 0, false, c => charHref(c.id))}
-  <h2>Progression</h2>${wait}<div class="cols"><section><div class="panel"><h3>Account XP gained, last ${gains.length} times</h3>${chart(gains.map(g => g.gain), gains.map(g => g.up ? '▲' : ''))}
+    N('Matches', c => c.n), N('Win rate', c => pct(c.w, c.d), c => bar(pct(c.w, c.d))), N('Level', c => c.level), Tx('Usual skin', skinOf),
+    N('Damage dealt', c => avg(c.dmg, c.dn ?? c.n)), N('Damage taken', c => avg(c.taken, c.dn ?? c.n))], Object.values(pchars), 2, 0, false, c => charHref(c.id))}${SUM?.split ? wait : ''}
+  ${PUBLIC ? '' : `<h2>Progression</h2>${waitFor(dev)}<div class="cols"><section><div class="panel"><h3>Account XP gained, last ${gains.length} times</h3>${chart(gains.map(g => g.gain), gains.map(g => g.up ? '▲' : ''))}
       <p class="note">▲ marks a level-up.</p></div></section>
-    <section>${table('prw-' + id, [N('When', r => r.t, r => day(r.t)), Tx('Why', r => pretty(r.why)), Tx('Reward', r => r.name), N('Amount', r => r.amount)], x.rewards, 0, 8)}</section></div>
+    <section>${table('prw-' + id, [N('When', r => r.t, r => day(r.t)), Tx('Why', r => pretty(r.why)), Tx('Reward', r => r.name), N('Amount', r => r.amount)], y.rewards, 0, 8)}</section></div>
   <h2>Challenges</h2>${table('pch-' + id, [Tx('Challenge', c => c.name), Tx('Category', c => c.cat), Tx('Status', c => c.pn >= c.pm ? 'Finished' : c.ev === 'ChallengeDecline' ? 'Declined' : 'In progress'),
-    N('Progress', c => pct(c.pn, c.pm), c => `${bar(pct(c.pn, c.pm))} <span class="dim">${num(c.pn)} / ${num(c.pm)}</span>`)], x.chall, 3)}
+    N('Progress', c => pct(c.pn, c.pm), c => `${bar(pct(c.pn, c.pm))} <span class="dim">${num(c.pn)} / ${num(c.pm)}</span>`)], y.chall, 3)}`}
   <h2>Matches</h2>${wait}${x.matches.slice(0, ST.players.all ? Infinity : 20).map(r => matchRow(asMatch(r), r.role)).join('')}
   ${x.matches.length > 20 && !ST.players.all ? `<p><button data-st="players.all" data-v="1">Show all ${num(x.matches.length)} matches</button></p>` : ''}`;
 }
@@ -841,6 +908,8 @@ function slots(p, stages) {
 /* Every finished match has a small file of its own records, and every day a list of its matches (tools/summarize.js writes them
    from the archive). So any match ever played can be opened, not only the recent ones this page loaded. */
 const SITE_DATA = window.TELEMETRY_SITE_DATA || 'archive/site';
+// the developer view's own files, written beside the job and never uploaded: the whole players table and each player's progression
+const DEV_DATA = 'archive/dev';
 // The files are small scripts that hand their data to TELEMETRY_LOADED(key, data): a script tag may load from the asset
 // bucket's address, where a plain fetch from this page would be refused by the browser.
 const FETCHED = {}, ARRIVED = {};      // key -> 'loading' | 'missing' | what came back
@@ -895,7 +964,7 @@ function match(id) {
   const dl = m.dialogue?.Data, hm = (a, b) => `${num(a)} → ${num(b)}`;
   return `<p class="sub" style="margin:0">${esc(modeName(m.hdr.GameMode))} · ${esc(typeName(m.hdr.MatchType))} ·${m.hdr.Multiplayer ? 'multiplayer' : 'solo'} · ${day(m.t)} · ${esc(m.v)}</p>
   <h1 style="color:${m.hunterWin ? '#6fc3bd' : m.decided ? '#e0584f' : '#fff'}">${m.hunterWin ? 'Hunters win' : m.decided ? 'Monster wins' : 'No result'}</h1>
-  <p class="sub">${endLabel(m.hdr.WinningTeam, m.hdr.WinCondition)} · ${esc(mapInfo(m.mapKey).name)} · ${clock(m.dur)}${m.kicks.length ? ` · ${m.kicks.length} anti-cheat kick` : ''}</p>
+  <p class="sub">${endLabel(m.hdr.WinningTeam, m.hdr.WinCondition)} · ${esc(mapInfo(m.mapKey).name)} · ${clock(m.dur)}${!PUBLIC && m.kicks.length ? ` · ${m.kicks.length} anti-cheat kick` : ''}</p>
   <h2>Scoreboard</h2>
   ${table('score', [Tx('Class', r => -ROLES.indexOf(r.role), r => img(C.classIcons[r.role], 'cls', r.role)), Tx('Character', r => charInfo(r.id).name, r => chip(r.id) + (r.cd ? ` <span class="dim">${esc(r.cd.CharacterSkin)}</span>` : '')),
     Tx('Player', r => r.ph.IsBot ? 'Bot' : pname(r.who || ''), r => r.ph.IsBot ? '<span class="dim">Bot</span>' : plink(r.who)),
@@ -905,8 +974,9 @@ function match(id) {
     N('Downs', r => r.role === 'Monster' ? null : incaps(r.role)), N('Deaths', r => H.Deaths?.[r.role] ?? null), N('Strikes', r => H.StrikesAtEnd?.[r.role] ?? null)], rows, 0)}
   <div style="height:.6rem"></div>
   ${table('score2', [Tx('Character', r => -ROLES.indexOf(r.role), r => chip(r.id)), N('To wildlife', r => r.ph.DamageToWildlife), N('From wildlife', r => r.ph.DamageFromWildlife), N('Character level', r => r.ph.CharacterLevel > 0 ? r.ph.CharacterLevel : null),
-    N('Chat messages', r => r.cd?.ChatMessagesSent ?? null), Tx('Joined late', r => '', r => r.cd ? (r.cd.LateJoiner ? 'Yes' : 'No') : '–'), N('Late joins', r => d.LateJoinerCounts?.[r.role] ?? null),
-    N('Hotswaps', r => r.cd ? sumv(r.cd.Hotswaps) : null), N('Disconnects', r => d.LeaverCounts?.[r.role] ?? null), N('Queued for', r => q(r.role)?.BaseHeader.Duration ?? null, r => clock(q(r.role)?.BaseHeader.Duration))], rows, 0)}
+    ...(PUBLIC ? [] : [N('Chat messages', r => r.cd?.ChatMessagesSent ?? null)]), Tx('Joined late', r => '', r => r.cd ? (r.cd.LateJoiner ? 'Yes' : 'No') : '–'), N('Late joins', r => d.LateJoinerCounts?.[r.role] ?? null),
+    N('Hotswaps', r => r.cd ? sumv(r.cd.Hotswaps) : null), N('Disconnects', r => d.LeaverCounts?.[r.role] ?? null),
+    ...(PUBLIC ? [] : [N('Queued for', r => q(r.role)?.BaseHeader.Duration ?? null, r => clock(q(r.role)?.BaseHeader.Duration))])], rows, 0)}
   <h2>Lobby</h2><div class="cols"><section><div class="panel">${kv('Parties', esc((d.InitialPartySizes || []).join(' + ')) || '–')}${kv('Hunter health buff', esc(d.MercHealthBuff || 'None'))}
       ${kv('A character was not what was asked for', m.hdr.RequestedCharacterMismatch ? 'Yes' : 'No')}${kv('Match start record', m.start ? 'Received' : 'Missing')}</div></section>
     <section>${table('lobby', [Tx('Class', r => -ROLES.indexOf(r.role), r => classCell(r.role)), N('Skill', r => d.PlayerSkillLevels?.[r.role] >= 0 ? d.PlayerSkillLevels[r.role] : null), N('Rating', r => d.PlayerGlickoScores?.[r.role] > 0 ? d.PlayerGlickoScores[r.role] : null),
@@ -919,7 +989,7 @@ function match(id) {
     <section><h2>Domes</h2><div class="panel">${kv('Thrown', num(d.Dome?.Throws))}${kv('Caught the Monster', num(d.Dome?.Captures))}${kv('Total time up', clock(d.Dome?.TotalTime))}
       ${kv('Monster damage taken in domes', num(m.domes.reduce((a, e) => a + (e.Data.MonsterSummary?.TotalDamageReceived || 0), 0)))}${kv('Hunters downed in domes', num(m.domes.reduce((a, e) => a + sumv(e.Data.HunterSummary?.TotalIncaps), 0)))}</div></section>
   </div>
-  <h2>Every dome</h2>
+  ${PUBLIC ? '' : `<h2>Every dome</h2>
   <div class="heatwrap">${heat(m.mapKey, m.domes.map(e => ({ x: e.Data.DomeXPosition, y: e.Data.DomeYPosition, caught: !!e.Data.InDome?.Monster })), 'all', true)}
   ${table('domes', [N('#', e => e.i), N('At', e => e.at, e => clock(e.at)), N('Up for', e => e.BaseHeader.Duration, e => Math.round(e.BaseHeader.Duration) + 's'),
     Tx('Inside', e => '', e => ROLES.filter(r => e.Data.InDome?.[r]).map(r => img(C.classIcons[r], 'cls', r)).join(' ')), Tx('Monster health', e => '', e => { const s = e.Data.MonsterSummary; return s ? hm(s.Start.HitPoints, s.End.HitPoints) : '–'; }),
@@ -929,28 +999,33 @@ function match(id) {
     Tx('Strikes after', e => '', e => { const s = e.Data.HunterSummary; return s ? HUNTERS.map(r => `${s.Start.Strikes[r]}→${s.End.Strikes[r]}`).join(' ') : '–'; }),
     Tx('Died', e => '', e => HUNTERS.filter(r => e.Data.HunterSummary?.Deaths?.[r]).join(', ') || '–'), Tx('Timed events', e => '', e => (e.Data.DurationEvents || []).map(x => `${pretty(x.Event)} ${x.Duration}s`).join(', ') || '–'),
     Tx('Ended match', e => '', e => e.Data.GameEnding ? 'Yes' : 'No')], m.domes.map((e, i) => ({ ...e, i: i + 1, at: (T(e) - t0) / 1000 - e.BaseHeader.Duration })), 0, 0, true)}</div>
-  <p class="note">Dome numbers on the map match the table. Strikes are listed Assault, Trapper, Medic, Support.</p>
+  <p class="note">Dome numbers on the map match the table. Strikes are listed Assault, Trapper, Medic, Support.</p>`}
   <h2>Weapons and abilities</h2>
   ${rows.filter(r => r.p).map(r => `<details class="c-${r.role}"><summary>${img(C.classIcons[r.role], 'cls', r.role)} ${face(r.id)} <b>${esc(charInfo(r.id).name)}</b>
     <span class="dim">${num(r.ph.DamageToEnemyTeam)} damage</span></summary>${slots(r.p, Math.min(3, m.hdr.MonsterFinalStage))}</details>`).join('')}
-  ${dl ? `<h2>Dialogue</h2><details><summary><b>${dl.Responses.length} voice lines played</b></summary>${table('dlog', [N('#', l => l.i), Tx('Speaker', l => charInfo(l.sp).name), Tx('Line', l => l.resp), Tx('Triggered by', l => l.ev),
+  ${dl && !PUBLIC ? `<h2>Dialogue</h2><details><summary><b>${dl.Responses.length} voice lines played</b></summary>${table('dlog', [N('#', l => l.i), Tx('Speaker', l => charInfo(l.sp).name), Tx('Line', l => l.resp), Tx('Triggered by', l => l.ev),
     N('Variation', l => l.va), Tx('', l => '', l => play(lineUrl(l.sp, l.resp)))], dl.Responses.map((resp, i) => ({ i: i + 1, resp, sp: dl.Speakers[i], ev: dl.EventNames[i], va: dl.Variations?.[i] })), 0, 0, true)}</details>` : ''}`;
 }
 
 function matchmaking() {
   // queue attempts are stored per patch, mode and ranked-or-not, so the filter bar picks groups to add up (the solo box does not apply)
   const pass = k => { const [v, mode, rk] = k.split('|'); return (!ST.fl.v || v === ST.fl.v) && (!ST.fl.mode || mode === ST.fl.mode) && (!ST.fl.type || (rk === 'R') === ST.fl.type.startsWith('Ranked')); };
-  const mm = SUMMARY.merge(Object.keys(ACC.mm).filter(pass).map(k => ACC.mm[k])) || { n: 0, ok: 0, dur: 0, dodges: 0, team: {}, type: {}, hourN: [], hourDur: [], stages: {}, reasons: {} };
-  const q = x => x ? avg(x.dur, x.n) : null, byHour = Array.from({ length: 24 }, (_, h) => avg(mm.hourDur[h], mm.hourN[h])), rows = o => Object.entries(o).map(([k, v]) => ({ k, ...v }));
+  const mm = SUMMARY.merge(Object.keys(ACC.mm).filter(pass).map(k => ACC.mm[k])) || { n: 0, ok: 0, dur: 0, dodges: 0, team: {}, type: {}, hourN: [], hourDur: [], hist: [], stages: {}, reasons: {} };
+  // queue times are medians (qmedian): a few attempts left running for hours pull the average far out
+  const q = x => x ? qmedian(x.hist) : null, byHour = Array.from({ length: 24 }, (_, h) => mm.hourHist?.[h] ? qmedian(mm.hourHist[h], HSTEP) : avg(mm.hourDur[h], mm.hourN[h])), rows = o => Object.entries(o).map(([k, v]) => ({ k, ...v }));
   const gaps = Object.keys(S.even).map(Number).sort((a, b) => a - b);
-  return `<h1>Matchmaking</h1><p class="sub">How long queues take, how far queue attempts get, and how even the matches are. Custom games never queue, so they are not here.</p>${filterBar()}
-  ${tiles(tile('Queue attempts', num(mm.n)), tile('Average queue', clock(avg(mm.dur, mm.ok)), 'when a match was found'), tile('Reached a match', fpct(pct(mm.ok, mm.n))), tile('Left the queue', fpct(pct(mm.n - mm.ok, mm.n))),
+  return `<h1>Matchmaking</h1><p class="sub">How long queues take, how even the matches are, and how often players leave them. Custom games never queue, so their queues are not here.</p>${filterBar()}
+  ${tiles(tile('Queue attempts', num(mm.n)), tile('Typical queue', clock(q(mm)), 'median, when a match was found'), tile('Reached a match', fpct(pct(mm.ok, mm.n))), tile('Left the queue', fpct(pct(mm.n - mm.ok, mm.n))),
     tile('Hunter queue', clock(q(mm.team.Merc))), tile('Monster queue', clock(q(mm.team.Monster))), tile('Ranked queue', clock(q(mm.type.Ranked))), tile('Arcade queue', clock(q(mm.type.Hunt))))}
-  <h2>Queue time through the day</h2><div class="panel">${chart(byHour, byHour.map((_, h) => String(h).padStart(2, '0')), clock)}<p class="note">Average queue by hour (UTC).${ST.fl.mode ? ' Most queue attempts are recorded without a mode, so with a mode picked only the ones that name it are counted.' : ''}</p></div>
-  <div class="cols"><section><h2>How far queue attempts get</h2>${table('mmst', [Tx('Step', s => pretty(s.k)), N('Reached', s => s.n), N('Share', s => pct(s.n, mm.n), s => bar(pct(s.n, mm.n))),
+  <p class="note">Queue times are medians: half of the queues that found a match took less, half took longer.</p>
+  <h2>Queue time through the day</h2><div class="panel">${chart(byHour, byHour.map((_, h) => String(h).padStart(2, '0')), clock)}<p class="note">Median queue by hour (UTC), to the minute.${ST.fl.mode ? ' Most queue attempts are recorded without a mode, so with a mode picked only the ones that name it are counted.' : ''}</p></div>
+  ${PUBLIC ? '' : `<div class="cols"><section><h2>How far queue attempts get</h2>${table('mmst', [Tx('Step', s => pretty(s.k)), N('Reached', s => s.n), N('Share', s => pct(s.n, mm.n), s => bar(pct(s.n, mm.n))),
       N('Time to reach', s => s.at / s.n, s => clock(s.at / s.n)), N('Players in lobby', s => s.lobby ? s.pl / s.n : null, s => s.lobby ? dec(s.pl / s.n) : '–')], rows(mm.stages), 1)}</section>
     <section><h2>Why people leave</h2>${table('mmwhy', [Tx('Reason', r => pretty(r.k)), N('Times', r => r.n), N('After', r => r.at / r.n, r => clock(r.at / r.n))], rows(mm.reasons), 1)}
-      <p class="note">${num(mm.dodges)} queue attempts were queue dodges: leaving a ranked lobby that already had a Hunter and a Monster.</p></section></div>
+      <p class="note">${num(mm.dodges)} queue attempts were queue dodges: leaving a ranked lobby that already had a Hunter and a Monster.</p></section></div>`}
+  <h2>Leavers</h2>
+  ${tiles(tile('Matches with a leaver', fpct(pct(S.leaverMatches, S.total)), `${num(S.leaverMatches)} of ${num(S.total)}`), tile('Disconnects', num(sumv(S.leavers))))}
+  ${table('mmleav', [Tx('Class', r => r.k, r => classTag(r.k)), N('Disconnects', r => r.n), P('Share of matches', r => pct(r.n, S.total))], ROLES.map(k => ({ k, n: S.leavers[k] || 0 })), 1)}
   <div class="cols"><section><h2>Parties and the health buff</h2>${table('mmparty', [Tx('Parties in the lobby', x => x.k.split('|')[0]), Tx('Hunter health buff', x => x.k.split('|')[1] || 'None'), N('Matches', x => x.n),
       N('Hunters win', x => pct(x.w, x.d), x => `<span class="c-Medic">${bar(pct(x.w, x.d))}</span>`)], Object.entries(S.party).map(([k, v]) => ({ k, ...v })), 2)}</section>
     <section><h2>How even matches are</h2><div class="panel c-Medic">${chart(gaps.map(g => pct(S.even[g].w, S.even[g].d)), gaps.map(g => (g > 0 ? '+' : '') + g), fpct)}
@@ -1001,18 +1076,21 @@ function dialogue() {
 }
 
 function community() {
-  const A = ACC, people = Object.values(A.players), days = Object.keys(A.daily).sort().slice(-28), founders = people.filter(p => p.founder === 'Yes').length;
+  // the public totals have no account table: a player count and a count per region instead
+  const A = ACC, people = Object.values(A.players || {}), nPeople = A.playersN ?? people.length, days = Object.keys(A.daily).sort().slice(-28), founders = people.filter(p => p.founder === 'Yes').length;
   const active = days.map(d => A.daily[d].active ?? A.daily[d].ids.length), signins = days.map(d => A.daily[d].signins), sessions = A.sessN ?? A.sessions.length;
-  const split = (id, label, key) => table(id, [Tx(label, x => pretty(x.k)), N('Players', x => x.n), N('Share', x => pct(x.n, people.length), x => bar(pct(x.n, people.length)))], count(people, key), 1);
+  const share = (id, label, rows) => table(id, [Tx(label, x => pretty(x.k)), N('Players', x => x.n), N('Share', x => pct(x.n, nPeople), x => bar(pct(x.n, nPeople)))], rows, 1);
+  const split = (id, label, key) => share(id, label, count(people, key));
   return `<h1>Community</h1><p class="sub">Who is playing, where and when.</p>
-  ${tiles(tile('Players', num(people.length), 'whose game has sent a record'), tile('Active on the last day', num(active.at(-1)), days.length ? day_(days.at(-1)) + ', so far' : ''), tile('Sign-ins', num(A.logins)), tile('New players', num(people.filter(p => p.fresh).length)),
-    tile('Founders', fpct(pct(founders, people.length)), `${num(founders)} players`), tile('Play sessions', sessions ? num(sessions) : '–'))}
+  ${tiles(tile('Players', num(nPeople), 'whose game has sent a record'), tile('Active on the last day', num(active.at(-1)), days.length ? day_(days.at(-1)) + ', so far' : ''), tile('Sign-ins', num(A.logins)),
+    PUBLIC ? '' : tile('New players', num(people.filter(p => p.fresh).length)), PUBLIC ? '' : tile('Founders', fpct(pct(founders, people.length)), `${num(founders)} players`), tile('Play sessions', sessions ? num(sessions) : '–'))}
   <div class="cols"><section><h2>Active players per day</h2><div class="panel">${chart(active, days.map(d => d.slice(8)))}</div></section>
     <section><h2>Sign-ins per day</h2><div class="panel">${chart(signins, days.map(d => d.slice(8)))}</div></section></div>
   <p class="note">Days are UTC. A player is active on a day when their game sent any record that day.</p>
-  <div class="cols"><section><h2>Regions</h2>${split('reg', 'Online region', p => p.region)}</section><section><h2>Ratings regions</h2>${split('creg', 'Ratings region', p => p.cregion)}</section></div>
+  ${PUBLIC ? `<h2>Regions</h2>${A.regions ? share('reg', 'Online region', Object.entries(A.regions).map(([k, n]) => ({ k, n }))) : split('reg', 'Online region', p => p.region)}`
+  : `<div class="cols"><section><h2>Regions</h2>${split('reg', 'Online region', p => p.region)}</section><section><h2>Ratings regions</h2>${split('creg', 'Ratings region', p => p.cregion)}</section></div>
   <div class="cols"><section><h2>Text language</h2>${split('lang', 'Language', p => p.lang)}</section><section><h2>Audio language</h2>${split('alang', 'Language', p => p.audio)}</section></div>
-  <h2>Patches, game build and platform</h2>${table('vers', [Tx('Patch · build · platform', v => v.k), N('Records', v => v.n), N('Last seen', v => v.t, v => day(v.t))], Object.entries(A.vers).map(([k, v]) => ({ k, ...v })), 2)}`;
+  <h2>Patches, game build and platform</h2>${table('vers', [Tx('Patch · build · platform', v => v.k), N('Records', v => v.n), N('Last seen', v => v.t, v => day(v.t))], Object.entries(A.vers).map(([k, v]) => ({ k, ...v })), 2)}`}`;
 }
 
 function fairplay() {
@@ -1030,7 +1108,7 @@ function fairplay() {
 }
 
 function about() {
-  const A = ACC, one = f => Object.keys(A.hdr[f] || {}).map(v => v === '' ? '(empty)' : v).join(', '), ctx = Object.keys(A.hdr.Context || {}).filter(Boolean);
+  const A = ACC, one = f => Object.keys(A.hdr?.[f] || {}).map(v => v === '' ? '(empty)' : v).join(', '), ctx = Object.keys(A.hdr?.Context || {}).filter(Boolean);
   const dist = Object.keys(ALL.dist || {}).join(', '), leftOut = SUM ? SUM.recordsLeftOut : LEFT_OUT,
     leftBy = Object.entries((SUM ? SUM.leftOutBy : LEFT_BY) || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${num(n)} ${c ? 'marked ' + esc(c) : 'with no release name'}`).join(', ');
   const feeds = [['Characters, Matchups, Perks, Maps, Match page', 'ServerRoundRecord', 'The PC hosting the match'], ['Weapon, ability, stage and source numbers', 'ServerPlayer Assault / Trapper / Medic / Support / Monster records', 'The PC hosting the match'],
@@ -1039,32 +1117,33 @@ function about() {
     ['Progression', 'ClientXPRecord, ClientRewardRecord, ClientChallengeUpdateRecord', "Each player's own game"], ['Store', 'ClientPurchaseRecord', "Each player's own game"],
     ['Community: sign-ins, Founders', 'ClientLoginRecord', "Each player's own game"], ['Movement and frame-rate heatmaps', 'ClientProfilingRecord', 'Nobody: never switched on']];
   return `<h1>About the data</h1><p class="sub">Evolve Stage 2 builds a set of records about every match, queue attempt and sign-in. This site only reads those records.</p>
-  <h2>What each page is built from</h2><div class="tw"><table><thead><tr><th>Page</th><th>Record</th><th>Sent by</th></tr></thead><tbody>${feeds.map(f => `<tr><td>${f[0]}</td><td>${f[1]}</td><td>${f[2]}</td></tr>`).join('')}</tbody></table></div>
+  ${PUBLIC ? '' : `<h2>What each page is built from</h2><div class="tw"><table><thead><tr><th>Page</th><th>Record</th><th>Sent by</th></tr></thead><tbody>${feeds.map(f => `<tr><td>${f[0]}</td><td>${f[1]}</td><td>${f[2]}</td></tr>`).join('')}</tbody></table></div>
   <h2>Records received</h2>${table('recs', [Tx('Record', r => r.k), N('Received', r => r.n), N('Last seen', r => r.t, r => day(r.t)), Tx('Data version', r => Object.keys(r.versions).join(', '))], Object.entries(A.records).map(([k, v]) => ({ k, ...v })), 1)}
   <h2>Record details</h2><div class="panel">${kv('Build configuration', esc(one('Config')))}${kv('Platform', esc(one('Platform')))}${kv('Change-list number', esc(one('Changelist')))}
     ${kv('Build number', esc(one('BuildNumber')))}${kv('Micro-patch version', esc(one('Micropatch')))}${kv('Context tags seen', esc(ctx.join(', ') || 'none'))}
-    ${kv('Application id', esc(one('PublicAppID')))}${kv('Header versions', `base ${esc(one('base'))} · player ${esc(one('player'))} · match ${esc(one('match'))} · per-player ${esc(one('perPlayer'))}`)}</div>
+    ${kv('Application id', esc(one('PublicAppID')))}${kv('Header versions', `base ${esc(one('base'))} · player ${esc(one('player'))} · match ${esc(one('match'))} · per-player ${esc(one('perPlayer'))}`)}</div>`}
   <h2>Things to know</h2><div class="panel"><ul class="plain">
     <li>Match records name the role and the character, never the player. A player is linked to a role only when their own game also reported the match; otherwise the scoreboard says "not reported".</li>
-    <li>Records hold no player names. Names shown here come from a separate id to name list. The sign-on session id is used to count play sessions and is never shown.</li>
+    ${PUBLIC ? '' : `<li>Records hold no player names. Names shown here come from a separate id to name list. The sign-on session id is used to count play sessions and is never shown.</li>`}
     <li>Match records come from the host's PC only, so a host could send false numbers. Nothing here cross-checks them yet.</li>
     <li>For Hunters the game counts every damage tick as a hit, so hits can exceed uses and its miss count is unreliable. Monster hits are counted per ability use.</li>
-    <li>Records carry no clock time. Dates, queue hours and dome times come from when each record arrived.</li>
-    <li>The game never fills in the Monster's distance travelled: the value seen across all ${num(ALL.total)} match records is ${esc(dist)}.</li>
-    <li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>
+    ${PUBLIC ? '' : `<li>Records carry no clock time. Dates, queue hours and dome times come from when each record arrived.</li>`}
+    ${PUBLIC ? '' : `<li>The game never fills in the Monster's distance travelled: the value seen across all ${num(ALL.total)} match records is ${esc(dist)}.</li>`}
+    ${PUBLIC ? '' : `<li>Hotswap and late-join counts may always read zero: nothing was found in the game that triggers them.</li>`}
     <li>Ranked ratings, matches, wins and losses come from the game server's own ladder, handed over with each update. The game keeps its division table hidden, so a division's rating range is known only once the game has asked the server about it.</li>
-    <li>The post-match survey never reaches a record, so its answers cannot be shown.</li>
-    <li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>
+    ${PUBLIC ? '' : `<li>The post-match survey never reaches a record, so its answers cannot be shown.</li>`}
+    ${PUBLIC ? '' : `<li>The game marks nobody as a first-time user or as a Founder in these records, so New players and Founders read zero.</li>`}
     <li>Matches played by bots are left out of character, perk and matchup numbers.</li>
     <li>When a host starts a match that never finishes, the game can carry that match's weapon list and damage into the record of the next one: another character's weapon names, or both characters' damage mixed together. So a match played right after an unfinished one on the same host counts for matches, picks and wins, and is left out of every damage, healing, weapon, ability and skill-point number, on character pages and players' own pages alike. The same goes for a record that lists weapons that are not the character's own, and for one that holds an impossible number (the new-player scenario scripts hits of 10,000,000).</li>
-    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(n => esc(n) + (PATCH_OF[n] ? ` (shown as ${esc(PATCH_OF[n])})` : '')).join(', ') : ''}. The launcher writes the release name on every record when the game is started: on the public game it is the public release at that moment, and it is blank only when the launcher could not read the release list. Records from any other build, or with no name, are left out${SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
+    <li>Only matches played on an official release are counted${OFFICIAL.size ? ': ' + [...OFFICIAL].map(n => esc(n) + (PATCH_OF[n] ? ` (shown as ${esc(PATCH_OF[n])})` : '')).join(', ') : ''}. The launcher writes the release name on every record when the game is started: on the public game it is the public release at that moment, and it is blank only when the launcher could not read the release list. Records from any other build, or with no name, are left out${PUBLIC ? '' : SUM || !SHOW_ALL ? `; ${num(leftOut)} left out so far${leftBy ? ` (${leftBy})` : ''}` : ' (this local preview shows everything)'}.</li>
     <li>The game collects telemetry data such as damage dealt, damage taken, healing, and a wide variety of other stats that are used to analyze matches and the current state of the game. Matches are shown here with the player's display name.</li></ul></div>
-  <h2>What the site holds</h2>${tiles(tile('Records', num(Object.values(A.records).reduce((a, r) => a + r.n, 0))), tile('Matches', num(ALL.total), 'finished'), tile('Players', num(Object.keys(A.players).length)),
+  <h2>What the site holds</h2>${tiles(PUBLIC ? '' : tile('Records', num(Object.values(A.records).reduce((a, r) => a + r.n, 0))), tile('Matches', num(ALL.total), 'finished'), tile('Players', num(A.playersN ?? Object.keys(A.players).length)),
     tile('Covers', SUM ? `${day_(SUM.from)} to ${day_(SUM.to)}` : EVENTS.length ? `${day(SPAN()[0])} to ${day(SPAN()[1])}` : '–', SUM ? 'updated ' + stamp(SUM.built) : ''))}`;
 }
 
 /* ---------- router ---------- */
 const routes = { '': overview, characters, character, matchups, perks, maps, ranked, players, player, matches, match, matchmaking, progression, store, dialogue, community, fairplay, about };
+if (PUBLIC) for (const s of ['progression', 'store', 'dialogue', 'fairplay']) delete routes[s];      // the developer view's own pages
 const parent = { character: 'characters', player: 'players', match: 'matches' };
 const header = document.querySelector('.top'), menuBtn = document.getElementById('menuBtn');   // the phone menu
 const menu = open => { header.classList.toggle('open', open); menuBtn.setAttribute('aria-expanded', open); menuBtn.textContent = open ? 'Close' : 'Menu'; };
