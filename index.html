@@ -211,20 +211,25 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
   <nav aria-label="Sections" id="nav"></nav>
 </header>
 <div class="sample" id="sample" hidden>Sample data. Every match, player and number on this site is invented to show the layout; none of it is a real match.</div>
-<main id="app"></main>
+<main id="app"><p class="dim">Loading the statistics…</p></main>
 <footer>Modded Evolve Telemetry. Built on the records Evolve Stage 2 writes itself (build 353012).</footer>
 
 <script src="data/catalog.js?v=24a9e195c36e"></script>
 
 <script src="summary.js?v=d02177b33821"></script>
 
+<link rel="preload" as="script" href="app.js?v=1a140a40b897">
 <script>
 (function () {
-  window.TELEMETRY_SITE_DATA = "https://assets.modded-evolve.com/telemetry/site";      // a file per match and per player and a list per day, fetched only when opened
-  // all-time totals: a file in the asset bucket, replaced each time the NAS recounts (asked for afresh every ten minutes)
-  var t = document.createElement('script'); t.src = "https://assets.modded-evolve.com/telemetry/totals2.js" + '?t=' + Math.floor(Date.now() / 600000);
-  t.onload = t.onerror = function () { var s = document.createElement('script'); s.src = "app.js?v=b58bc89e4b13"; document.body.appendChild(s); };
-  document.head.appendChild(t);
+  var site = "https://assets.modded-evolve.com/telemetry/site";
+  window.TELEMETRY_SITE_DATA = site;      // the public totals in parts, and a file per match, per player and per day, fetched only when opened
+  var load = function (src, then) { var s = document.createElement('script'); s.src = src; s.onload = s.onerror = then; document.head.appendChild(s); };
+  // which counting run is current: a few bytes, asked for afresh every five minutes. Every data file is then asked for under that
+  // run's stamp, so the browser keeps it until the NAS has counted again (hourly) instead of fetching it anew.
+  load(site + '/build.js?t=' + Math.floor(Date.now() / 300000), function () {
+    var b = window.TELEMETRY_BUILD ? encodeURIComponent(window.TELEMETRY_BUILD.built) : Math.floor(Date.now() / 3600000);
+    load(site + '/core.js?b=' + b, function () { load("app.js?v=1a140a40b897", function () {}); });
+  });
 })();
 </script>
 </body>
