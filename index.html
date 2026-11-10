@@ -71,10 +71,14 @@ thead button { all: unset; cursor: pointer; } thead button:hover, th.on button {
 button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 tbody tr { border-top: 1px solid var(--border); } tbody tr:hover { background: #111; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+td.few { opacity: .4; }      /* a win rate from too few matches to rank (table()'s minimum) */
 .dim { color: var(--muted); }
 
 .chip { display: inline-flex; align-items: center; gap: .55rem; font-weight: 600; }
 .chip img, .face { width: 46px; height: 28px; object-fit: cover; border-radius: 3px; background: #111; }
+/* tables side by side: the same row height, so their rows line up across the page */
+td .chip { vertical-align: middle; }
+.cols tbody tr { height: 46px; }
 a.chip:hover span { text-decoration: underline; }
 .perk { width: 26px; height: 26px; object-fit: contain; display: inline-block; vertical-align: middle; }
 .plv { color: var(--muted); font-size: .72rem; vertical-align: bottom; }
@@ -88,6 +92,12 @@ a.chip:hover span { text-decoration: underline; }
   border: 1px solid var(--border); border-radius: 4px; padding: .35rem .8rem; cursor: pointer; }
 .tabs button.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 .tabs button:disabled { opacity: .4; cursor: default; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin: .5rem 0 0; }
+.pager button { font: 600 .85rem var(--font); min-width: 2rem; padding: .25rem .5rem; color: var(--muted); background: var(--card);
+  border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.pager button.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.pager button:disabled { opacity: .35; cursor: default; }
+.pager .dim { font-size: .86rem; margin: 0 .2rem; }
 .tabs button { display: inline-flex; align-items: center; gap: .4rem; }
 .tabs button img.tier { width: 34px; height: 34px; object-fit: contain; }
 .tag { display: inline-flex; align-items: center; gap: .35rem; vertical-align: middle; } .tag .cls, .tabs .cls { width: 20px; height: 15px; }
@@ -163,6 +173,7 @@ svg.tl { width: 100%; height: auto; display: block; }
 .legend { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; color: var(--muted); font-size: .84rem; margin-top: .5rem; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: .35rem; background: var(--c); }
 .note { color: var(--muted); font-size: .86rem; margin: .5rem 0 0; }
+.lead { color: var(--muted); font-size: .92rem; margin: -.3rem 0 .7rem; }
 ul.plain { margin: .3rem 0; padding-left: 1.2rem; } ul.plain li { margin: .25rem 0; }
 footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .84rem; padding: 1rem 1.25rem; text-align: center; }
 .menu-btn { display: none; }
@@ -218,7 +229,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
 
 <script src="summary.js?v=d02177b33821"></script>
 
-<link rel="preload" as="script" href="app.js?v=1a140a40b897">
+<link rel="preload" as="script" href="app.js?v=c30169c06630">
 <script>
 (function () {
   var site = "https://assets.modded-evolve.com/telemetry/site";
@@ -228,7 +239,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
   // run's stamp, so the browser keeps it until the NAS has counted again (hourly) instead of fetching it anew.
   load(site + '/build.js?t=' + Math.floor(Date.now() / 300000), function () {
     var b = window.TELEMETRY_BUILD ? encodeURIComponent(window.TELEMETRY_BUILD.built) : Math.floor(Date.now() / 3600000);
-    load(site + '/core.js?b=' + b, function () { load("app.js?v=1a140a40b897", function () {}); });
+    load(site + '/core.js?b=' + b, function () { load("app.js?v=c30169c06630", function () {}); });
   });
 })();
 </script>
