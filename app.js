@@ -223,8 +223,8 @@ const sliceKeys = SUM ? Object.keys(SUM.slices) : [];
 for (const [k, v] of Object.entries(SUM?.items || {})) ITEMS[k] ||= v;      // weapon and ability names the job learned from the records (learnItems)
 const optionsOf = (i, f) => SUM ? [...new Set(sliceKeys.map(k => k.split('|')[i]))].sort() : uniq(f);
 // solo matches are left out by default, unless they are all there is
-const ST = { fl: { v: '', mode: '', type: '', rank: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
-  players: { q: '', region: '', all: '', list: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
+const ST = { fl: { v: '', mode: '', type: '', rank: '', solo: (SUM ? sliceKeys.some(k => k.endsWith('|0')) : MATCHES.some(m => m.hdr.Multiplayer)) ? '' : '1' }, chars: { cls: 'All', bst: '3' }, perks: { tab: 'hunter', tier: '', all: '', allc: '', char: '' }, maps: { key: '', view: 'all' }, rk: { view: 'o', tier: '', cls: '', region: '', q: '', sort: 'rating' },
+  players: { q: '', region: '', all: '', side: '', pchar: '' }, dlg: { speaker: '' }, prog: { track: 'Global' }, browse: { day: '', all: '' } };
 const passes = m => (!ST.fl.v || m.v === ST.fl.v) && (!ST.fl.mode || m.hdr.GameMode === ST.fl.mode) && (!ST.fl.type || m.hdr.MatchType === ST.fl.type) && (ST.fl.solo || m.hdr.Multiplayer);
 const uniq = f => [...new Set(MATCHES.map(f))].sort();
 const select = (path, opts, cur, all) => `<select data-st="${path}">${all ? `<option value="">${all}</option>` : ''}${opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o];
@@ -533,24 +533,61 @@ const pickRate = (n, group) => pct(n, people(group));
 
 /* ---------- sortable table ---------- */
 const sortState = {};
-// href(row) makes the whole row open that address when clicked or tapped
-function table(id, cols, rows, def = 0, limit = 0, asc = false, href = null) {
+// href(row) makes the whole row open that address when clicked or tapped.
+// min: the matches a win rate needs before it can lead (Roger, 2026-11-09: no more 1-match 100% rows on top). A rate column
+// made with W() knows its own sample; below min its cell is greyed, and when the table is sorted by it those rows come after
+// all the others, in the same order. Nothing is hidden.
+// A closed box for detail a reader opens only when they want it. It stays open across re-renders (sorting, filters).
+const FOLDS = new Set();
+const fold = (key, title, hint, body) => `<details class="fold" data-fold="${key}"${FOLDS.has(key) ? ' open' : ''}><summary><b>${title}</b><span class="dim">${hint}</span></summary><div class="in">${body}</div></details>`;
+function table(id, cols, rows, def = 0, limit = 0, asc = false, href = null, min = 0) {
   const st = sortState[id] || (sortState[id] = { i: def, dir: asc ? 1 : -1 }), col = cols[st.i] || cols[0];
+  const few = (c, r) => !!(min && c.cnt && c.cnt(r) < min);
   let sorted = [...rows].sort((a, b) => {
     const x = col.v(a), y = col.v(b);
     if (x == null || y == null) return (x == null) - (y == null);
     return (typeof x === 'string' ? x.localeCompare(y) : x - y) * st.dir;
   });
-  if (limit) sorted = sorted.slice(0, limit);
+  const fewN = sorted.filter(r => few(col, r)).length;
+  if (fewN) sorted = [...sorted.filter(r => !few(col, r)), ...sorted.filter(r => few(col, r))];
+  // limit: rows per page; numbered pages under the table let a reader go through the whole sorted list
+  const total = sorted.length, pages = limit ? Math.max(1, Math.ceil(total / limit)) : 1, pg = Math.min(st.pg || 0, pages - 1);
+  if (limit) sorted = sorted.slice(pg * limit, pg * limit + limit);
+  const pgBtn = (q, label, off) => `<button data-pg="${esc(id)}" data-p="${q}"${q === pg ? ' class="on"' : ''}${off ? ' disabled' : ''}>${label}</button>`;
+  const near = [...new Set([0, pg - 1, pg, pg + 1, pages - 1])].filter(q => q >= 0 && q < pages).sort((a, b) => a - b);
+  const pager = pages < 2 ? '' : `<div class="pager">${pgBtn(pg - 1, '‹', !pg)}${near.map((q, i) => (i && q - near[i - 1] > 1 ? '<span class="dim">…</span>' : '') + pgBtn(q, q + 1)).join('')}${pgBtn(pg + 1, '›', pg === pages - 1)}
+    <span class="dim">${num(pg * limit + 1)}–${num(Math.min(total, pg * limit + limit))} of ${num(total)}</span></div>`;
   return `<div class="tw"><table><thead><tr>${cols.map((c, i) => `<th class="${c.n ? 'n' : ''}${i === st.i ? ' on' : ''}" aria-sort="${i === st.i ? (st.dir < 0 ? 'descending' : 'ascending') : 'none'}"><button data-sort="${esc(id)}" data-i="${i}">${c.h}${i === st.i ? (st.dir < 0 ? ' ▾' : ' ▴') : ''}</button></th>`).join('')}</tr></thead>
-  <tbody>${sorted.map(r => `<tr${href ? ` data-href="${esc(href(r))}"` : ''}>${cols.map(c => `<td class="${c.n ? 'n' : ''}">${c.r ? c.r(r) : esc(c.v(r) ?? '–')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="dim">Nothing recorded yet.</td></tr>`}</tbody></table></div>`;
+  <tbody>${sorted.map(r => `<tr${href ? ` data-href="${esc(href(r))}"` : ''}>${cols.map(c => few(c, r)
+    ? `<td class="${c.n ? 'n ' : ''}few" title="Fewer than ${num(min)} matches">${c.r ? c.r(r) : esc(c.v(r) ?? '–')}</td>`
+    : `<td class="${c.n ? 'n' : ''}">${c.r ? c.r(r) : esc(c.v(r) ?? '–')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="dim">Nothing recorded yet.</td></tr>`}</tbody></table></div>${pager}`
+  + (fewN ? `<p class="note">Only rows with ${num(min)} or more matches are ranked by ${esc(col.h)}. The ${plural(fewN, 'row', 'rows')} with fewer ${fewN === 1 ? 'comes' : 'come'} after them, greyed.</p>` : '');
 }
 const N = (h, v, r) => ({ h, v, r: r || (x => num(v(x))), n: 1 });
 const P = (h, v) => N(h, v, x => fpct(v(x)));
+// a win rate with its sample (cnt: the matches it comes from), so table()'s minimum can keep small samples from leading
+const W = (h, v, r, cnt) => ({ ...N(h, v, r || (x => fpct(v(x)))), cnt });
+// the minimum for perks: 30 matches, or 1% of the matches they are out of when that is more
+const FEW = 30, minOf = base => Math.max(FEW, Math.ceil((base || 0) / 100));
+// Perk combinations: only loadouts with more than COMBO_MIN matches are listed at all (Roger, 2026-11-09), so a handful of
+// games never decides anything; the note under the table says how many were left out.
+const COMBO_MIN = 30, comboRows = all => all.filter(x => x.n > COMBO_MIN);
+const comboNote = (all, base) => { const out = all.length - comboRows(all).length;
+  return `<p class="note">${out ? `Only loadouts with more than ${COMBO_MIN} matches are listed; ${plural(out, 'rarer one is', 'rarer ones are')} left out. ` : ''}Adjusted
+  counts each loadout as if it also had ${ADJ_K} matches at the average win rate of the loadouts listed (${fpct(100 * base)}), so a
+  short lucky run does not lead. Sort by it to find the strongest loadouts.</p>`; };
+// Adjusted win rate (Roger, 2026-11-09), on "Most matches on" and perk combinations: each row counted as if it also had ADJ_K
+// matches at the average win rate of the rows listed (for players, the character's regulars: 65.9% on Goliath on 9 Nov). ADJ_K is the site's own rule, "proven over many
+// games": the 9 Nov data suggests about 20-35 for Hunters but only about 3 for Monsters, whose players differ far more, and
+// with 3 the Goliath list would be led by 14-0 and 18-0 records again.
+const ADJ_K = 20;
+// win rates of the listed rows, and the Adjusted column for them (what: "player", "loadout", "build"; get: a row's wins and decided)
+const adjusted = (list, what, get = x => x) => { const w = list.reduce((a, x) => a + get(x).w, 0), d = list.reduce((a, x) => a + get(x).d, 0), base = d ? w / d : 0.5;
+  const value = x => 100 * (get(x).w + ADJ_K * base) / (get(x).d + ADJ_K);
+  return { base, value, col: P(`<span title="Win rate as if each ${what} also had ${ADJ_K} matches at the average win rate of the ${what}s listed">Adjusted</span>`, value) }; };
 const Tx = (h, v, r) => ({ h, v, r });
 // what usually sets a voice line off: its most common trigger (ties go to the first in A to Z order), with a count of the others
 const trigger = l => { const e = Object.entries(l.events || {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); return e.length ? e[0][0] + (e.length > 1 ? ` (+${e.length - 1} more)` : '') : '–'; };
-const LV = N('Avg level', p => avg(p.lv, p.lvN), p => dec(avg(p.lv, p.lvN)));      // a perk row's average recorded level, 1 to 3
 const count = (list, key) => { const o = {}; for (const x of list) { const k = key(x); if (k != null) o[k] = (o[k] || 0) + 1; } return Object.entries(o).map(([k, n]) => ({ k, n })); };
 
 /* ---------- shared pieces ---------- */
@@ -603,9 +640,9 @@ function characters() {
   ${tabs('chars.cls', ['All', ...ROLES.map(r => [r, img(C.classIcons[r], 'cls') + r])], ST.chars.cls)}
   ${hint('Tap a character to open its full page: weapons and abilities, stages, perks, skins, opponents and more.')}
   <div class="bigchips">${table('chars', [Tx('Character', c => charInfo(c.id).name, c => chip(c.id, true)), Tx('Class', c => c.role, c => classCell(c.role)),
-    N('Matches', c => c.n), P('Pick rate', c => R ? pct(c.n, seats[c.role]) : pickRate(c.n, c.role)), N('Win rate', c => pct(c.w, c.d), c => `<span class="c-${c.role}">${bar(pct(c.w, c.d))}</span>`),
+    N('Matches', c => c.n), P('Pick rate', c => R ? pct(c.n, seats[c.role]) : pickRate(c.n, c.role)), W('Win rate', c => pct(c.w, c.d), c => `<span class="c-${c.role}">${bar(pct(c.w, c.d))}</span>`, c => c.n),
     N('Damage dealt', c => avg(own(c).dmg, own(c).n)), N('Damage taken', c => avg(own(c).taken, own(c).n)), N('Healing done', c => avg(own(c).heal, own(c).n) || null),
-    N('Avg level', c => avg(c.lvl, c.lvlN), c => dec(avg(c.lvl, c.lvlN)))], rows, 2, 0, false, c => charHref(c.id))}</div>
+    N('Avg level', c => avg(c.lvl, c.lvlN), c => dec(avg(c.lvl, c.lvlN)))], rows, 2, 0, false, c => charHref(c.id), FEW)}</div>
   <p class="note">${(ST.chars.cls === 'All' ? ROLES : [ST.chars.cls]).map(r => R ? `${r}: ${num(seats[r] || 0)} players' matches at this rank` : `${r}: a person played it in ${num(people(r))} of the ${num(S.total)} matches${S.bots[r] ? ` (a bot in the other ${num(S.bots[r])})` : ''}`).join(' · ')}.
     Each class's pick rates are out of its own number and add up to 100%.</p>
   <p class="note">Damage and healing are averages per match, against the other team only, from the matches whose damage record can be relied on (a few in every hundred cannot; About the data explains).</p>`;
@@ -629,57 +666,55 @@ function character(id) {
   // reached, with the exact points it held in every ability by then; so a match that ended at Stage 2 is in the Stage 1 and
   // Stage 2 lists, and the three lists never need an empty column.
   const buildsBy = stage => Object.values(Object.values(kit.builds).filter(b => b.levels.length >= stage).reduce((o, b) => {
-    const levels = b.levels.slice(0, stage), x = cell(o, levels.map(l => l.join('·')).join('>'), () => ({ n: 0, w: 0, d: 0, levels })); x.n += b.n; x.w += b.w; x.d += b.d; return o; }, {})).sort((a, b) => b.n - a.n);
-  const buildCards = stage => { const list = buildsBy(stage), all = list.reduce((a, b) => a + b.n, 0);
-    return !all ? '' : `<h3 style="margin-top:1.2rem">By Stage ${stage} · ${plural(all, 'match', 'matches')}</h3>
-    <div class="builds">${list.slice(0, stage === 3 ? 6 : 3).map((b, i) => `<div class="build"><div class="bh"><b>Build ${i + 1}</b><span>${plural(b.n, 'match', 'matches')} (${fpct(pct(b.n, all))}) · ${fpct(pct(b.w, b.d))} won</span></div>
-      <table class="skill"><thead><tr><th></th>${b.levels.map((_, s) => `<th>Stage ${s + 1}</th>`).join('')}</tr></thead><tbody>
-      ${abil.map((a, j) => `<tr><td>${icon(a.icon)}${esc(a.name)}</td>${b.levels.map(l => `<td>${pips(l[j])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('')}</div>`; };
-  // the four abilities, always in their own order (1 to 4, the same on every Monster): points invested in each and its share of the list's points
-  const ranked = (title, matches, points) => { const total = points.reduce((a, b) => a + b, 0);
-    return `<div class="build"><div class="bh"><b>${title}</b><span>${plural(total, 'point', 'points')} in ${plural(matches, 'match', 'matches')}</span></div>${abil.map((a, j) => ({ a, v: points[j] })).map((x, i) =>
-      `<div class="rk-row"><span class="rk-n">${i + 1}</span>${icon(x.a.icon)}<span class="rk-name">${esc(x.a.name)}<small>${plural(x.v, 'point', 'points')}</small></span><span class="c-Monster rk-v">${bar(pct(x.v, total))}</span></div>`).join('')}</div>`; };
+    const pts = b.levels[stage - 1], x = cell(o, pts.join('·'), () => ({ n: 0, w: 0, d: 0, pts })); x.n += b.n; x.w += b.w; x.d += b.d; return o; }, {})).sort((a, b) => b.n - a.n);
+  // Builds at one stage: the points held in each ability by the end of it, with matches and win rate. (A table of each
+  // ability's share of the points spent was dropped on 2026-11-09, Roger: every ability got about 20-33%, so it said little.)
+  const bst = +ST.chars.bst || 3, stageList = buildsBy(bst), stageAll = stageList.reduce((x, y) => x + y.n, 0), bAdj = adjusted(stageList.filter(x => x.n >= FEW), 'build');
+  const buildTable = table(`bld-${id}-${bst}`, [...abil.map((ab, j) => N(`${icon(ab.icon)}${esc(ab.name)}`, x => x.pts[j], x => pips(x.pts[j]))),
+    N('Matches', x => x.n), P('Share', x => pct(x.n, stageAll)), W('Win rate', x => pct(x.w, x.d), null, x => x.n), bAdj.col],
+    stageList, 4, 10, false, null, FEW) + `<p class="note">Adjusted counts each build as if it also had ${ADJ_K} matches at the average win rate
+    of the builds with ${FEW} or more matches (${fpct(100 * bAdj.base)}), so a build with few matches does not lead by luck.</p>`;
+  // Order (Roger, 2026-11-09): what players come for first (perks, builds, matchups, abilities); per-stage numbers, wildlife,
+  // damage sources and skins sit in closed boxes at the bottom, still one tap away.
+  const ccList = comboRows(Object.values(c.combos)), ccAdj = adjusted(ccList, 'loadout');
   return `<div class="headline c-${c.role}">${img(info.thumb, 'big', info.name)}<div>${classTag(c.role)}<h1 style="margin-top:.4rem">${esc(info.name)}</h1></div></div>${filterBar()}${rankBar()}
   ${tiles(tile('Matches', num(c.n)), tile('Pick rate', fpct(R ? pct(c.n, classSeats) : pickRate(c.n, c.role)), R ? `of ${c.role} players at this rank` : `of ${c.role} matches`), tile('Win rate', fpct(pct(c.w, c.d))),
-    tile('Average level', dec(avg(c.lvl, c.lvlN))), tile('Damage dealt', num(avg(kit.dmg, kit.n)), 'per match'), tile('Damage taken', num(avg(kit.taken, kit.n)), 'per match'),
-    tile('To wildlife', num(avg(kit.wlTo, kit.n)), 'damage per match'), tile('From wildlife', num(avg(kit.wlFrom, kit.n)), 'damage per match'),
-    mon ? tile('Feeding', dec(avg(c.feed, c.n)), 'per match') : tile('Deaths', dec(avg(c.deaths, c.n)), `${dec(avg(c.downs, c.n))} downs per match`))}${leftOut}
+    tile('Damage dealt', num(avg(kit.dmg, kit.n)), 'per match'), tile('Damage taken', num(avg(kit.taken, kit.n)), 'per match'),
+    mon ? tile('Feeding', dec(avg(c.feed, c.n)), 'per match') : tile('Deaths', dec(avg(c.deaths, c.n)), `${dec(avg(c.downs, c.n))} downs per match`))}
+  <div>
+    <section><h2>Perks picked</h2><p class="lead">How often each perk is taken with ${esc(info.name)}, and how often those matches are won.</p>${table('cp-' + id, [Tx('Perk', p => perkInfo(p.key).name, p => `${img(perkInfo(p.key).icon, 'perk')} ${esc(perkInfo(p.key).name)}`),
+      P('Pick rate', p => pct(p.n, c.n)), N('Matches', p => p.n), W('Win rate', p => pct(p.w, p.d), null, p => p.n)], Object.values(c.perks), 1, 10, false, null, minOf(c.n))}</section>
+    <section><h2>Perk combinations</h2><p class="lead">The full set of perks taken together in one match.</p>${table('cc-' + id, [Tx('Perks', x => x.keys.join(), x => perkIcons(x.keys) + ' <span class="dim">' + x.keys.map(k => esc(perkInfo(k).name)).join(', ') + '</span>'), N('Matches', x => x.n), W('Win rate', x => pct(x.w, x.d), null, x => x.n), ccAdj.col], ccList, 1, 10)}${comboNote(Object.values(c.combos), ccAdj.base)}</section>
+  </div>
+  ${mon ? `<h2>Builds</h2>
+      <p class="lead">Each row is one build: the points players had in each ability at the end of the stage, out of 3 (● is a
+      point), and how often it wins. Pick a stage to see how builds start and grow. Only matches that reached that stage count.</p>
+      ${tabs('chars.bst', [1, 2, 3].map(st => [String(st), 'Stage ' + st, !buildsBy(st).length]), String(bst))}${buildTable}` : ''}
+  <div class="cols">
+    <section><h2>${mon ? 'Against each Hunter' : 'Against each Monster'}</h2><p class="lead">${esc(info.name)}'s win rate in matches against each ${mon ? 'Hunter' : 'Monster'}.</p>${table('vs-' + id, [Tx('Opponent', v => charInfo(v.id).name, v => chip(v.id)), N('Matches', v => v.n),
+      W('Win rate', v => pct(v.w, v.d), v => `<span class="c-${c.role}">${bar(pct(v.w, v.d))}</span>`, v => v.n)], Object.entries(c.vs).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, v => charHref(v.id), FEW)}</section>
+    <section>${topPlayers(id, c, info.name)}</section>
+  </div>
   <h2>${mon ? 'Abilities and attacks' : 'Weapons and equipment'}</h2>
+  <p class="lead">Per match: how often each is used, how often it lands, and how much damage it does. Share is its part of all the damage ${esc(info.name)} deals.</p>
   ${table('items-' + id, [Tx('Item', it => SLOT_ORDER[mon ? 1 : 0].indexOf(it.label) + 1 || 99, it => `${icon(it.info.icon)}${esc(it.info.name || it.label)}`),
     N('Uses', it => avg(it.uses, it.n) || null, it => it.uses ? dec(it.uses / it.n) : '–'), N('Misses', it => avg(it.miss, it.n) || null, it => it.uses ? dec(it.miss / it.n) : '–'),
     N('Hits', it => avg(it.hits, it.n) || null, it => it.uses ? dec(it.hits / it.n) : '–'), N('Wildlife hits', it => avg(it.hitsWl, it.n) || null, it => it.uses ? dec(it.hitsWl / it.n) : '–'),
     mon ? P('Hit rate', it => pct(it.hits, it.uses)) : N('Damage per use', it => avg(it.dmg, it.uses)),
     N('Damage', it => avg(it.dmg, it.n)), N('To wildlife', it => avg(it.dmgWl, it.n)), N('Share', it => pct(it.dmg, total), it => bar(pct(it.dmg, total)))], items, 0, 0, true)}
-  <p class="note">${mon ? 'A use counts as a hit when it damages a Hunter before the ability is used again.' : 'The game counts every damage tick as a hit, so hits can exceed uses and its miss count is unreliable for Hunters.'} Averages per match.</p>
-  <h2>By Monster stage</h2>
-  ${table('stage-' + id, [Tx('Stage', s => s.i, s => 'Stage ' + s.i), N('Matches reaching it', s => s.n), N('Damage dealt', s => avg(s.to, s.n)), N('Damage taken', s => avg(s.from, s.n)),
-    N('To wildlife', s => avg(s.wlTo, s.n)), N('From wildlife', s => avg(s.wlFrom, s.n)), mon ? P('Hit rate', s => pct(s.hits, s.uses)) : N('Healing done', s => avg(s.heal, s.n) || null)],
-    kit.st.map((s, i) => ({ ...s, i })).filter(s => s.i && s.n), 0, 0, true)}
-  <h2>Damage and healing sources</h2>
-  ${table('src-' + id, [Tx('Source', s => named(s.name, s.name).name), Tx('Kind', s => s.kind), N('Per match', s => s.s[0] / kit.n), N('Stage 1', s => s.s[1] / kit.n), N('Stage 2', s => s.s[2] / kit.n), N('Stage 3', s => s.s[3] / kit.n)], Object.values(kit.src), 2)}
-  ${mon ? `<h2>Skill points</h2>
-    <h3>Most popular abilities</h3>
-    <div class="ranks">${ranked('Overall', kit.lvN[0], [0, 1, 2, 3].map(j => kit.pts.reduce((a, s) => a + s[j], 0)))}
-      ${[0, 1, 2].filter(s => kit.lvN[s]).map(s => ranked('Stage ' + (s + 1), kit.lvN[s], kit.pts[s])).join('')}</div>
-    <p class="note">How many skill points players invested in each ability, and what share of all the points invested that is. Each list adds up to 100%. A stage's list counts only the points spent at that stage; Overall counts every point spent in the match. Abilities are always listed in their own order, 1 to 4.</p>
-    <h3 style="margin-top:1.4rem">Most used builds</h3>
-    ${[1, 2, 3].map(buildCards).join('')}
-    <p class="note">A build is the exact points a player had in every ability by that stage; filled dots are points spent. Every match is counted at each stage its Monster reached, so a match that ended at Stage 2 is in the Stage 1 and Stage 2 lists. The percentage in brackets is the build's share of the matches that reached that stage.</p>
-    <div class="cols"><section><h2>Stages</h2><div class="panel">${[1, 2, 3].map(s => kv(`First fight at Stage ${s}`, plural(c.firstStage[s] || 0, 'match', 'matches'))).join('')}${[1, 2, 3].map(s => kv(`Finished at Stage ${s}`, plural(c.finalStage[s] || 0, 'match', 'matches'))).join('')}</div></section></div>`
-  : `<div class="cols"><section><h2>Healing and shielding</h2><div class="panel">${kv('Healing done', num(avg(kit.heal, kit.n)) + ' per match')}${kv('Healing received', num(avg(c.healRecv, c.n)) + ' per match')}
+  <p class="note">${mon ? 'A use counts as a hit when it damages a Hunter before the ability is used again.' : 'The game counts every damage tick as a hit, so hits can exceed uses and its miss count is unreliable for Hunters.'} Averages per match.</p>${leftOut}
+  ${mon ? '' : `<div class="cols"><section><h2>Healing and shielding</h2><div class="panel">${kv('Healing done', num(avg(kit.heal, kit.n)) + ' per match')}${kv('Healing received', num(avg(c.healRecv, c.n)) + ' per match')}
       ${kv('Shielding received', num(avg(c.shield, c.n)) + ' per match')}${kv('Dropship returns', dec(avg(c.ships, c.n)) + ' per match')}</div></section>
     <section><h2>When ${esc(info.name)} goes down</h2><div class="panel c-${c.role}">${chart(c.downT, c.downT.map((_, i) => i + (i === 19 ? '+' : '')))}<p class="note">Downs by minute of the match.</p></div></section></div>`}
-  <div class="cols">
-    <section><h2>${mon ? 'Against each Hunter' : 'Against each Monster'}</h2>${table('vs-' + id, [Tx('Opponent', v => charInfo(v.id).name, v => chip(v.id)), N('Matches', v => v.n),
-      N('Win rate', v => pct(v.w, v.d), v => `<span class="c-${c.role}">${bar(pct(v.w, v.d))}</span>`)], Object.entries(c.vs).map(([k, v]) => ({ id: k, ...v })), 1, 0, false, v => charHref(v.id))}</section>
-    <section><h2>Perks picked</h2>${table('cp-' + id, [Tx('Perk', p => perkInfo(p.key).name, p => `${img(perkInfo(p.key).icon, 'perk')} ${esc(perkInfo(p.key).name)}`),
-      P('Pick rate', p => pct(p.n, c.n)), P('Win rate', p => pct(p.w, p.d)), LV], Object.values(c.perks), 1, 12)}</section>
-  </div>
-  <div class="cols">
-    <section><h2>Perk combinations</h2>${table('cc-' + id, [Tx('Perks', x => x.keys.join(), x => perkIcons(x.keys) + ' <span class="dim">' + x.keys.map(k => esc(perkInfo(k).name)).join(', ') + '</span>'), N('Matches', x => x.n), P('Win rate', x => pct(x.w, x.d))], Object.values(c.combos), 1, 8)}</section>
-    <section><h2>Skins used</h2>${table('skin-' + id, [Tx('Skin', s => s.k), N('Matches', s => s.n), N('Share', s => pct(s.n, sumv(c.skins)), s => bar(pct(s.n, sumv(c.skins))))], Object.entries(c.skins).map(([k, n]) => ({ k, n })), 1)}</section>
-  </div>
-  ${topPlayers(id, c, info.name)}`;
+  <h2>More detail</h2>
+  ${fold('more', 'By Monster stage, wildlife and level', 'damage dealt and taken at each stage, wildlife, average level', tiles(tile('Average level', dec(avg(c.lvl, c.lvlN))),
+    tile('To wildlife', num(avg(kit.wlTo, kit.n)), 'damage per match'), tile('From wildlife', num(avg(kit.wlFrom, kit.n)), 'damage per match')) + `
+    ${table('stage-' + id, [Tx('Stage', s => s.i, s => 'Stage ' + s.i), N('Matches reaching it', s => s.n), N('Damage dealt', s => avg(s.to, s.n)), N('Damage taken', s => avg(s.from, s.n)),
+    N('To wildlife', s => avg(s.wlTo, s.n)), N('From wildlife', s => avg(s.wlFrom, s.n)), mon ? P('Hit rate', s => pct(s.hits, s.uses)) : N('Healing done', s => avg(s.heal, s.n) || null)],
+    kit.st.map((s, i) => ({ ...s, i })).filter(s => s.i && s.n), 0, 0, true)}
+    ${mon ? `<h3 style="margin-top:1.2rem">Stages</h3><div class="panel">${[1, 2, 3].map(s => kv(`First fight at Stage ${s}`, plural(c.firstStage[s] || 0, 'match', 'matches'))).join('')}${[1, 2, 3].map(s => kv(`Finished at Stage ${s}`, plural(c.finalStage[s] || 0, 'match', 'matches'))).join('')}</div>` : ''}`)}
+  ${fold('src', 'Damage and healing sources', `every effect that dealt or healed damage, ${Object.keys(kit.src).length} sources`, `${table('src-' + id, [Tx('Source', s => named(s.name, s.name).name), Tx('Kind', s => s.kind), N('Per match', s => s.s[0] / kit.n), N('Stage 1', s => s.s[1] / kit.n), N('Stage 2', s => s.s[2] / kit.n), N('Stage 3', s => s.s[3] / kit.n)], Object.values(kit.src), 2)}`)}
+  ${fold('skins', 'Skins used', `${Object.keys(c.skins).length} skins`, `${table('skin-' + id, [Tx('Skin', s => s.k), N('Matches', s => s.n), N('Share', s => pct(s.n, sumv(c.skins)), s => bar(pct(s.n, sumv(c.skins))))], Object.entries(c.skins).map(([k, n]) => ({ k, n })), 1)}`)}`;
 }
 
 function matchups() {
@@ -688,11 +723,11 @@ function matchups() {
   const label = id => `<span class="chip">${img(charInfo(id).thumb, '')}<span>${esc(charInfo(id).name)}</span></span>`;
   // Hunter-favoured cells use the Stage 2 website's Hunter blue (#2f6f9f); Monster-favoured cells the Monster red
   const shade = v => v >= 50 ? `rgba(47,111,159,${Math.min(.95, .2 + (v - 50) / 38)})` : `rgba(139,26,26,${Math.min(.95, .15 + (50 - v) / 40)})`;
-  return `<h1>Matchups</h1>${hint('Who wins versus who: how often the Hunters win when this Hunter faces this Monster. Blue favours the Hunter, red favours the Monster. Under each percentage is the number of matches it comes from. Pairs with fewer than 3 matches are left blank. Hunters and Monsters are listed in tier order.')}${filterBar()}
+  return `<h1>Matchups</h1>${hint('Who wins versus who: how often the Hunters win when this Hunter faces this Monster. Blue favours the Hunter, red favours the Monster. Under each percentage is the number of matches it comes from. Pairs with fewer than 3 matches are left blank, and pairs with fewer than ' + FEW + ' are shown in grey: too few to say who is favoured. Hunters and Monsters are listed in tier order.')}${filterBar()}
   <div class="tw" style="border:0"><table class="grid"><thead><tr><th></th>${mons.map(m => `<th>${face(m)}${esc(charInfo(m).name)}</th>`).join('')}</tr></thead><tbody>
   ${HUNTERS.map(role => `<tr class="sep"><td colspan="${mons.length + 1}">${role}</td></tr>` + inTier(role).map(h =>
     `<tr><td>${label(h)}</td>${mons.map(m => { const v = S.chars[h]?.vs[m]; return v && v.n >= 3
-      ? `<td class="cell" style="background:${shade(pct(v.w, v.d) ?? 50)}" title="${v.w} Hunter wins in ${v.n} matches">${v.d ? pct(v.w, v.d).toFixed(0) + '%' : '–'}<small>${v.n} matches</small></td>`
+      ? `<td class="cell" style="background:${v.n >= FEW ? shade(pct(v.w, v.d) ?? 50) : 'rgba(255,255,255,.06)'}" title="${v.w} Hunter wins in ${v.n} matches">${v.d ? pct(v.w, v.d).toFixed(0) + '%' : '–'}<small>${v.n} matches</small></td>`
       : `<td class="cell dim" title="${v ? v.n : 0} matches">·</td>`; }).join('')}</tr>`).join('')).join('')}
   </tbody></table></div>`;
 }
@@ -700,13 +735,12 @@ function matchups() {
 function perks() {
   // the characters that bring a perk most often, as a share of that character's own matches (at least 3 uses, so one-offs don't lead)
   const fans = p => Object.entries(p.chars).filter(([, n]) => n >= 3).map(([id, n]) => ({ id, share: pct(n, S.chars[id].n) })).sort((a, b) => b.share - a.share).slice(0, 3);
-  // one list at a time, ten rows unless "show all" is on, so the page is short on a phone
-  const k = ST.perks, team = ['hunter', 'monster', 'char'].includes(k.tab) ? k.tab : 'hunter', top = k.all ? 0 : 10;
-  const more = (n, what, key = 'all') => n > 10 ? tabs('perks.' + key, [[k[key] ? '' : '1', k[key] ? 'Show top 10 only' : `Show all ${n} ${what}`]], null) : '';
-  // the three-perk combinations for whichever list is showing, under its perk table, with their own "show all"
+  // one list at a time, ten rows a page, so the page is short on a phone
+  const k = ST.perks, team = ['hunter', 'monster', 'char'].includes(k.tab) ? k.tab : 'hunter', top = 10;
+  // the three-perk combinations for whichever list is showing, under its perk table, with their own pages
   const comboCell = x => perkIcons(x.keys) + ' <span class="dim">' + x.keys.map(key => esc(perkInfo(key).name)).join(', ') + '</span>';
-  const combosTable = (id, title, rows, rate) => `<h2>${title}</h2>` + table(id, [Tx('Combination', x => x.keys.join(), comboCell), P('Pick rate', rate), N('Matches', x => x.n),
-    P('Win rate', x => pct(x.w, x.d))], rows, 1, k.allc ? 0 : 10) + more(rows.length, 'combinations', 'allc');
+  const combosTable = (id, title, rows, rate, list = comboRows(rows), ad = adjusted(list, 'loadout')) => `<h2>${title}</h2>` + table(id, [Tx('Combination', x => x.keys.join(), comboCell), P('Pick rate', rate), N('Matches', x => x.n),
+    W('Win rate', x => pct(x.w, x.d), null, x => x.n), ad.col], list, 1, 10) + comboNote(rows, ad.base);
   let body;
   const ids = ROLES.flatMap(r => Object.keys(C.characters).filter(x => C.characters[x].class === r)), id = C.characters[k.char] ? k.char : ids[0];
   const got = part(team === 'char' ? 'char/' + id : 'perks');
@@ -720,7 +754,7 @@ function perks() {
         <a href="${charHref(id)}">${cue('Full stats')}</a></div>` +
       tabs('perks.tier', [['', 'All tiers'], 'Minor', 'Major', 'Superior'], k.tier) +
       table('perks-char', [Tx('Perk', p => perkInfo(p.key).name, perkCell), Tx('Tier', p => perkInfo(p.key).tier), P('Pick rate', p => pct(p.n, c.n)), N('Matches', p => p.n),
-        N('Win rate', p => pct(p.w, p.d), p => `<span class="c-${esc(info.class)}">${bar(pct(p.w, p.d))}</span>`), LV], rows, 2, top) + more(rows.length, 'perks') +
+        W('Win rate', p => pct(p.w, p.d), p => `<span class="c-${esc(info.class)}">${bar(pct(p.w, p.d))}</span>`, p => p.n)], rows, 2, top, false, null, minOf(c?.n)) +
       combosTable('combos-char', `Combinations on ${esc(info.name)}`, combos, x => pct(x.n, c.n)) +
       `<p class="note">On this tab, pick rate is the share of ${esc(info.name)}'s own matches where the perk or combination was brought.</p>`;
   } else {
@@ -729,7 +763,7 @@ function perks() {
       table('perks-' + team, [Tx('Perk', p => perkInfo(p.key).name, p => `${img(perkInfo(p.key).icon, 'perk')} ${esc(perkInfo(p.key).name)}`), Tx('Tier', p => perkInfo(p.key).tier),
         N('Usual slot', p => p.slots.indexOf(Math.max(...p.slots)) + 1), P('Pick rate', p => pickRate(p.m, team)), N('Matches', p => p.m),
         Tx('Most used on', p => charInfo(fans(p)[0]?.id || '').name, p => `<span class="comp">${fans(p).map(f => `<a href="#/character/${encodeURIComponent(f.id)}" title="${esc(charInfo(f.id).name)}: in ${fpct(f.share)} of their matches">${face(f.id)}</a>`).join('') || '<span class="dim">–</span>'}</span>`),
-        N('Win rate', p => pct(p.mw, p.md), p => `<span class="${team === 'monster' ? 'c-Monster' : 'c-Medic'}">${bar(pct(p.mw, p.md))}</span>`), LV], rows, 3, top) + more(rows.length, 'perks') +
+        W('Win rate', p => pct(p.mw, p.md), p => `<span class="${team === 'monster' ? 'c-Monster' : 'c-Medic'}">${bar(pct(p.mw, p.md))}</span>`, p => p.m)], rows, 3, top, false, null, minOf(people(team))) +
       combosTable('combos-' + team, team === 'monster' ? 'Monster perk combinations' : 'Hunter perk combinations', Object.values(S.combos).filter(x => x.team === team), x => pickRate(x.n, team));
   }
   return `<h1>Perks</h1><p class="sub">Which perks are picked the most, and which are not. Pick rate is the share of matches where the perk was brought: 100% would mean it showed up in every match.</p>${filterBar()}
@@ -754,25 +788,30 @@ function maps() {
   ${tiles(tile('Matches', num(mp.n)), tile('Hunters win', fpct(pct(mp.w, mp.d))), tile('Average match', clock(avg(mp.dur, mp.n))), tile('First fight', clock(avg(mp.first, mp.n))),
     tile('Ended inside a dome', fpct(pct(mp.endDome, mp.n))), tile('Wildlife damage', num(avg(mp.wlMon, mp.n)), 'to the Monster, per match'), tile('Wildlife damage', num(avg(mp.wlHun, mp.n)), 'to Hunters, per match'))}
   <h2>How matches end here</h2>${endsTable('ends-' + mp.key, mp.ends, mp.n)}
-  <h2>All maps</h2>${table('maps', [Tx('Map', m => mapInfo(m.key).name), N('Matches', m => m.n), N('Hunters win', m => pct(m.w, m.d), m => `<span class="c-Medic">${bar(pct(m.w, m.d))}</span>`),
-    N('Average match', m => avg(m.dur, m.n), m => clock(avg(m.dur, m.n))), N('First fight', m => avg(m.first, m.n), m => clock(avg(m.first, m.n))), P('Domes that caught', m => pct(m.caught, m.throws))], list, 1)}`;
+  <h2>All maps</h2>${table('maps', [Tx('Map', m => mapInfo(m.key).name), N('Matches', m => m.n), W('Hunters win', m => pct(m.w, m.d), m => `<span class="c-Medic">${bar(pct(m.w, m.d))}</span>`, m => m.n),
+    N('Average match', m => avg(m.dur, m.n), m => clock(avg(m.dur, m.n))), N('First fight', m => avg(m.first, m.n), m => clock(avg(m.first, m.n))), P('Domes that caught', m => pct(m.caught, m.throws))], list, 1, 0, false, null, FEW)}`;
 }
 
 // The ranked ladder as the account server holds it: the rating after a player's latest match (what the game itself shows), with
 // matches, wins and losses per side. It comes with every update (tools/summarize.js puts it in the totals). Without it the
 // "Most matches on <character>". Under a rank the seats counted at that rank carry their players; otherwise they come from the
 // players file, added up for the slices the filter bar selects.
-// Only players with at least TOP_MIN matches on the character under the filters are listed (Roger, 2026-10-18). On the public site
+// Only players with at least TOP_MIN matches on the character under the filters are listed (Roger: 5 on 2026-10-18, 10 on 2026-11-09). On the public site
 // the character's own part carries its players; the developer view adds them up from the players file.
-const TOP_MIN = 5;
+const TOP_MIN = 10, OWN_MIN = 5;      // OWN_MIN: a player's own Characters table ranks win rate on 5+ matches
 function topPlayers(id, c, name) {
   const split = SUM?.split, R = split ? null : roster(), have = split || typeof R === 'object';
   const who = c.players || (!have ? null : split ? SUMMARY.merge(sliceKeys.filter(slicePasses).map(k => CHAR_PLAYERS[id]?.[k]).filter(Boolean)) || {}
     : SUMMARY.merge(sliceKeys.filter(slicePasses).map(k => R.chars[k]?.[id]).filter(Boolean)) || {});
   const level = pid => split ? CHAR_LEVELS[id]?.[pid] : R.players[pid]?.chars[id]?.level;
-  return `<h2>Most matches on ${esc(name)}</h2>` + (!who ? waiting('', R).replace('<h1></h1>', '') : table('cpl-' + id, [Tx('Player', p => pname(p.id), p => plink(p.id)), N('Matches', p => p.n), P('Win rate', p => pct(p.w, p.d)),
-    N('Level', p => level(p.id))], Object.entries(who).filter(([, v]) => v.n >= TOP_MIN).map(([k, v]) => ({ id: k, ...v })), 1, 10, false, p => playerHref(p.id))
-    + `<p class="note">Players with at least ${TOP_MIN} matches on ${esc(name)} under these filters.</p>`);
+  const list = who ? Object.entries(who).filter(([, v]) => v.n >= TOP_MIN).map(([k, v]) => ({ id: k, ...v })) : [];
+  const { base, col: adjCol } = adjusted(list, 'player');
+  return `<h2>Most matches on ${esc(name)}</h2><p class="lead">The players with the most matches on ${esc(name)}, and how often they win.</p>` + (!who ? waiting('', R).replace('<h1></h1>', '') : table('cpl-' + id, [Tx('Player', p => pname(p.id), p => plink(p.id)), N('Matches', p => p.n), P('Win rate', p => pct(p.w, p.d)),
+    adjCol, N('Level', p => level(p.id))], list, 1, 10, false, p => playerHref(p.id))
+    + `<p class="note">Players with at least ${TOP_MIN} matches on ${esc(name)} under these filters. Adjusted win rate is this site's way of ranking
+    players who have proven it over many games: each player is counted as if they had also played ${ADJ_K} matches at the
+    average win rate of the players listed (${fpct(100 * base)}). A short perfect streak moves towards that average; a long
+    strong record barely moves. Sort by it to find the best players.</p>`);
 }
 // ladders are worked out from the match records, whose ratings are from the start of each match and so trail by one match.
 const side = l => l ? { n: l.played, w: l.wins, d: l.wins + l.losses, rating: l.rating } : { n: 0, w: 0, d: 0, rating: null };
@@ -789,20 +828,26 @@ function ranked() {
     const mains = Object.values(p.chars).filter(c => k.view === 'o' || (charInfo(c.id).class === 'Monster') === (k.view === 'm')).sort((a, b) => b.n - a.n).slice(0, 3);
     return { id: p.id, ...lad, placed, pn, div: placed ? division(lad.rating) : null, mains, cls: charInfo(mains[0]?.id).class, region: acct(p.id)?.region };
   }).filter(p => p.n && (!k.tier || p.div?.tier === k.tier) && (!k.cls || p.cls === k.cls) && (!k.region || p.region === k.region) && (!k.q || pname(p.id).toLowerCase().includes(k.q.toLowerCase())));
-  const wr = p => pct(p.w, p.d) || 0;
-  players.sort((a, b) => k.sort === 'winrate' ? wr(b) - wr(a) : k.sort === 'wins' ? b.w - a.w : (b.placed - a.placed) || (b.rating || 0) - (a.rating || 0) || wr(b) - wr(a));
+  // a win rate ranks only once the player is placed and has PLAYER_MIN matches; the rest follow it, greyed
+  // Adjusted win rate (see ADJ_K), measured against the placed players with PLAYER_MIN or more matches in this view
+  const ok = p => p.placed && p.n >= PLAYER_MIN, rAdj = adjusted(players.filter(ok), 'player'), byAdj = k.sort === 'adjusted';
+  const wr = p => byAdj ? rAdj.value(p) : pct(p.w, p.d) || 0, byWr = k.sort === 'winrate' || byAdj, fewN = byWr ? players.filter(p => !ok(p)).length : 0;
+  players.sort((a, b) => byWr ? (ok(b) - ok(a)) || wr(b) - wr(a) : k.sort === 'wins' ? b.w - a.w : (b.placed - a.placed) || (b.rating || 0) - (a.rating || 0) || wr(b) - wr(a));
   const divCell = p => p.div ? `<div class="div">${img(p.div.icon, '', p.div.name)}<span>${esc(p.div.name)}</span></div>` : `<span class="dim">In placement (${p.pn}/${PLACEMENT})</span>`;
   const tierBtn = t => [t, img(C.ranks.find(r => r.tier === t && r.name.endsWith('Destroyer')).icon, 'tier', t)];
   return `<h1>Ranked</h1><p class="sub">The ranked leaderboard, from ranked matches only. Hunters and Monsters have separate ladders; a player is placed after ${PLACEMENT} matches on a ladder.</p>
   ${tabs('rk.view', [['o', 'Overall'], ['h', 'Hunter'], ['m', 'Monster']], k.view)}
   <div class="filters">${tabs('rk.tier', [['', 'All'], tierBtn('gold'), tierBtn('silver'), tierBtn('bronze')], k.tier).replace('class="tabs"', 'class="tabs" style="margin:0"')}
     ${select('rk.cls', ROLES, k.cls, 'All classes')}${PUBLIC ? '' : select('rk.region', regionList().map(r => [r, pretty(r)]), k.region, 'All regions')}
-    <input type="search" data-st="rk.q" placeholder="Search player" aria-label="Search player" value="${esc(k.q)}">${select('rk.sort', [['rating', 'Sort: rating'], ['winrate', 'Sort: win rate'], ['wins', 'Sort: wins']], k.sort)}</div>
-  <div class="podium">${players.slice(0, 3).map((p, i) => `<div><div class="rk" style="color:${['#ffd700', '#cfd2d4', '#cd7f3a'][i]}">#${i + 1}</div>${p.div ? img(p.div.icon, '', p.div.name) : ''}
-    <div><b>${plink(p.id)}</b></div><div class="wr">${fpct(pct(p.w, p.d))}</div><div class="dim">${p.w}-${p.d - p.w} · ${p.div ? esc(p.div.name) : 'In placement'}</div></div>`).join('')}</div>
-  <div class="tw"><table><thead><tr><th>Division</th><th class="n">#</th><th>Player</th><th>Mains</th><th class="n">Rating</th><th class="n">W-L</th><th class="n">Win rate</th></tr></thead><tbody>
+    <input type="search" data-st="rk.q" placeholder="Search player" aria-label="Search player" value="${esc(k.q)}">${select('rk.sort', [['rating', 'Sort: rating'], ['winrate', 'Sort: win rate'], ['adjusted', 'Sort: adjusted win rate'], ['wins', 'Sort: wins']], k.sort)}</div>
+  <div class="podium">${(byWr ? players.filter(ok) : players).slice(0, 3).map((p, i) => `<div><div class="rk" style="color:${['#ffd700', '#cfd2d4', '#cd7f3a'][i]}">#${i + 1}</div>${p.div ? img(p.div.icon, '', p.div.name) : ''}
+    <div><b>${plink(p.id)}</b></div><div class="wr">${fpct(byAdj ? rAdj.value(p) : pct(p.w, p.d))}${byAdj ? ' <small class="dim">adjusted</small>' : ''}</div><div class="dim">${p.w}-${p.d - p.w} · ${p.div ? esc(p.div.name) : 'In placement'}</div></div>`).join('')}</div>
+  <div class="tw"><table><thead><tr><th>Division</th><th class="n">#</th><th>Player</th><th>Mains</th><th class="n">Rating</th><th class="n">W-L</th><th class="n">Win rate</th><th class="n" title="Win rate as if each player also had ${ADJ_K} matches at the average win rate of the ranked players listed">Adjusted</th></tr></thead><tbody>
   ${players.map((p, i) => `<tr data-href="${esc(playerHref(p.id))}"><td>${divCell(p)}</td><td class="n">${i + 1}</td><td><b>${plink(p.id)}</b></td><td><span class="comp">${p.mains.map(c => face(c.id)).join('')}</span></td>
-    <td class="n">${num(p.rating)}</td><td class="n dim">${p.w}-${p.d - p.w}</td><td class="n">${bar(pct(p.w, p.d))}</td></tr>`).join('') || '<tr><td colspan="7" class="dim">No players found.</td></tr>'}</tbody></table></div>
+    <td class="n">${num(p.rating)}</td><td class="n dim">${p.w}-${p.d - p.w}</td>${ok(p) ? '<td class="n">' : `<td class="n few" title="In placement, or fewer than ${PLAYER_MIN} matches">`}${bar(pct(p.w, p.d))}</td><td class="n${ok(p) ? '' : ' few'}">${fpct(rAdj.value(p))}</td></tr>`).join('') || '<tr><td colspan="8" class="dim">No players found.</td></tr>'}</tbody></table></div>
+  <p class="note">Adjusted counts each player as if they had also played ${ADJ_K} matches at the average win rate of the placed players
+  with ${PLAYER_MIN} or more matches in this view (${fpct(100 * rAdj.base)}), so a short winning streak does not outrank a long strong record.</p>
+  ${fewN ? `<p class="note">Sorted by ${byAdj ? 'adjusted ' : ''}win rate among placed players with ${PLAYER_MIN} or more matches. The ${plural(fewN, 'player', 'players')} still in placement or with fewer matches ${fewN === 1 ? 'comes' : 'come'} after them, greyed.</p>` : ''}
   <details style="margin-top:1.2rem"><summary><b>Rank legend</b></summary><div class="in"><div class="legend3">${['bronze', 'silver', 'gold'].map(t => `<div><h3>${t}</h3>${C.ranks.filter(r => r.tier === t).reverse().map(r =>
     `<div class="div">${img(r.icon, '', r.name)}<span>${esc(r.name)} <span class="dim">${r.max != null ? `${num(r.min)} to ${num(r.max)}` : 'range not seen yet'}</span></span></div>`).join('')}</div>`).join('')}</div>
     <p class="note">Tiers: Bronze below ${num(C.tiers.silver[0])}, Silver from ${num(C.tiers.silver[0])}, Gold from ${num(C.tiers.gold[0])}. A division's own range is listed once the game has asked the server about it, which happens when a player reaches it. Until then a player there is shown by tier, or as one of the two divisions it can be.</p></div></details>
@@ -810,22 +855,41 @@ function ranked() {
 }
 
 const PLAYERS_SHOWN = 100;
+const PLAYER_MIN = 20;       // matches a player's win rate needs to rank on the Players and Ranked pages
+// a player's matches with other people (the players file's `pp`, written by tools/summarize.js): solo matches against bots left out
+const peopleOf = p => { const a = p.pp || [0, 0, 0, 0, 0, 0]; return { n: a[0], w: a[1], d: a[2], h: { n: a[3], w: a[4], d: a[5] }, m: { n: a[0] - a[3], w: a[1] - a[4], d: a[2] - a[5] } }; };
 function players() {
   const R = roster(); if (typeof R !== 'object') return waiting('Players', R);
-  const q = ST.players.q.trim().toLowerCase(), fav = p => Object.values(p.chars).sort((a, b) => b.n - a.n)[0];
-  // the first PLAYERS_SHOWN rows of the current sort (drawing all of them, 18,000 and more, took seconds); a search narrows the whole table
-  const rows = Object.values(R.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region));
+  // win rates from matches with other people when the players file has them (an older file, or counting on the spot: every match)
+  const wl = p => !R.people ? p : p.wl || (p.wl = peopleOf(p));
+  // Overall, or one side (Roger, 2026-11-09): h = Hunter, m = Monster. A side shows that side's matches, win rate, rating and most
+  // played character, and lists only players who have played it.
+  const side = ['h', 'm'].includes(ST.players.side) ? ST.players.side : '', sideName = { h: 'Hunter', m: 'Monster' }[side];
+  const rec = p => side ? wl(p)[side] : wl(p), matchesOf = p => side ? p[side]?.n || 0 : p.n;
+  const q = ST.players.q.trim().toLowerCase(), fav = p => Object.values(p.chars).filter(c => !side || (charInfo(c.id).class === 'Monster') === (side === 'm')).sort((a, b) => b.n - a.n)[0];
+  // Adjusted win rate, measured against the players who rank (PLAYER_MIN or more matches with other people, on this side)
+  const pAdj = adjusted(Object.values(R.players).filter(p => rec(p).n >= PLAYER_MIN), 'player', rec);
+  // PLAYERS_SHOWN rows a page of the current sort (drawing all of them, 18,000 and more, took seconds); a search narrows the whole table
+  const rows = Object.values(R.players).filter(p => (!q || pname(p.id).toLowerCase().includes(q)) && (!ST.players.region || acct(p.id)?.region === ST.players.region) && matchesOf(p) > 0);
   return `<h1>Players</h1><p class="sub">Everyone whose game has reported at least one match. Search for a name to find anyone.</p>
   <div class="filters"><input type="search" data-st="players.q" placeholder="Search players" aria-label="Search players" value="${esc(ST.players.q)}">
     ${PUBLIC ? '' : select('players.region', regionList().map(r => [r, pretty(r)]), ST.players.region, 'All regions')}</div>
+  ${tabs('players.side', [['', 'Overall'], ['m', 'Monster'], ['h', 'Hunter']], side)}
   ${hint('Tap a player to open their profile: characters, ranked ladders and latest matches.')}
-  ${table('players', [Tx('Player', p => pname(p.id), p => plink(p.id) + (!PUBLIC && acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level), N('Rating', p => topRating(ladderOf(p).h, ladderOf(p).m)), N('Matches', p => p.n),
-    N('Win rate', p => pct(p.w, p.d), p => bar(pct(p.w, p.d))), N('As Hunter', p => pct(p.h.w, p.h.d), p => p.h.n ? `${fpct(pct(p.h.w, p.h.d))} <span class="dim">(${p.h.n})</span>` : '–'),
-    N('As Monster', p => pct(p.m.w, p.m.d), p => p.m.n ? `${fpct(pct(p.m.w, p.m.d))} <span class="dim">(${p.m.n})</span>` : '–'), Tx('Most played', p => charInfo(fav(p).id).name, p => chip(fav(p).id)),
+  ${table('players' + side, [Tx('Player', p => pname(p.id), p => plink(p.id) + (!PUBLIC && acct(p.id)?.founder === 'Yes' ? ' <span class="tag gold">Founder</span>' : '') + cue('Profile')), N('Level', p => p.level),
+    N('Rating', p => side ? ladderOf(p)[side].rating : topRating(ladderOf(p).h, ladderOf(p).m)), N('Matches', matchesOf),
+    W('Win rate', p => pct(rec(p).w, rec(p).d), p => bar(pct(rec(p).w, rec(p).d)), p => rec(p).n), pAdj.col,
+    ...(side ? [] : [W('As Hunter', p => pct(wl(p).h.w, wl(p).h.d), p => wl(p).h.n ? `${fpct(pct(wl(p).h.w, wl(p).h.d))} <span class="dim">(${wl(p).h.n})</span>` : '–', p => wl(p).h.n),
+      W('As Monster', p => pct(wl(p).m.w, wl(p).m.d), p => wl(p).m.n ? `${fpct(pct(wl(p).m.w, wl(p).m.d))} <span class="dim">(${wl(p).m.n})</span>` : '–', p => wl(p).m.n)]),
+    Tx(side ? `Most played ${sideName}` : 'Most played', p => charInfo(fav(p)?.id || '').name, p => fav(p) ? chip(fav(p).id) : '–'),
     ...(PUBLIC ? [N('Last match', p => p.t, p => day(p.t))] : [Tx('Region', p => pretty(acct(p.id)?.region)), N('Last seen', p => acct(p.id)?.t, p => day(acct(p.id)?.t))])],
-    rows, 3, ST.players.list ? 0 : PLAYERS_SHOWN, false, p => playerHref(p.id))}
-  ${rows.length > PLAYERS_SHOWN && !ST.players.list ? `<p class="note">The first ${num(PLAYERS_SHOWN)} of ${num(rows.length)} players in this order. <button data-st="players.list" data-v="1">Show all</button></p>` : ''}
-  <p class="note">Rating is the ranked rating the game reports for the player; it is blank until they have one.</p>`;
+    rows, 3, PLAYERS_SHOWN, false, p => playerHref(p.id), PLAYER_MIN)}
+  <p class="note">Adjusted counts each player as if they had also played ${ADJ_K} matches at the average win rate of the players
+  with ${PLAYER_MIN} or more matches${side ? ` as ${sideName}` : ''} (${fpct(100 * pAdj.base)}), so a short winning streak does not outrank a long strong record.
+  Sort by it to find the best players.</p>
+  ${!R.people ? '' : side ? `<p class="note">Matches counts every match as ${sideName}. Win rate and Adjusted count only matches with other people: solo matches against bots are left out, as on the rest of the site.</p>`
+    : '<p class="note">Matches counts every match. Win rate, As Hunter and As Monster count only matches with other people: solo matches against bots are left out, as on the rest of the site. The number in brackets is how many matches each of those win rates comes from.</p>'}
+  <p class="note">Rating is ${side ? `the player's ${sideName} ladder rating` : 'the ranked rating the game reports for the player (the higher of their two ladders)'}; it is blank until they have one.</p>`;
 }
 
 // a line of a player's own match list (their file), in the shape matchRow() draws
@@ -847,17 +911,36 @@ function player(id) {
   const skinOf = c => c.skin ?? Object.entries(c.skins || {}).sort((a, b) => b[1] - a[1])[0]?.[0];      // the public players file keeps only the usual skin
   // every character they played: in the public site's players file only their mains, the whole table in their own file
   const pchars = SUM?.split ? x.chars || {} : p.chars;
+  // Perks (Roger, 2026-11-09): what they bring on each character, from their own match rows (pk: the perks of that match, in the
+  // player files from 9 Nov). Every match with perks recorded counts, like the rest of this page.
+  const pkMatches = x.matches.filter(r => r.pk?.length && r.c?.[r.role]), charOf = r => r.c[r.role];
+  const pkChars = Object.entries(pkMatches.reduce((o, r) => { o[charOf(r)] = (o[charOf(r)] || 0) + 1; return o; }, {})).sort((a, b) => b[1] - a[1]);
+  const pkChar = pkChars.some(([cid]) => cid === ST.players.pchar) ? ST.players.pchar : pkChars[0]?.[0], pkRows = pkMatches.filter(r => charOf(r) === pkChar);
+  const decided = r => r.win === 'Merc' || r.win === 'Monster' ? 1 : 0, won = r => decided(r) && (r.role === 'Monster') === (r.win === 'Monster') ? 1 : 0;
+  const tally = keysOf => Object.values(pkRows.reduce((o, r) => { for (const k of keysOf(r)) { const t = o[k] ||= { k, n: 0, w: 0, d: 0 }; t.n++; t.w += won(r); t.d += decided(r); } return o; }, {}));
+  const pkPerks = tally(r => r.pk), pkSets = tally(r => r.pk.length > 1 ? [[...r.pk].sort().join('+')] : []);
+  const perkCell = k => `${img(perkInfo(k).icon, 'perk')} ${esc(perkInfo(k).name)}`;
   return `<h1>${esc(pname(id))} ${!PUBLIC && a?.founder === 'Yes' ? '<span class="tag gold">Founder</span>' : ''}</h1>
   <p class="sub">${a ? `${esc(pretty(a.region))} · text ${esc(a.lang)} · audio ${esc(a.audio)} · first seen ${day(a.since)} · last seen ${day(a.t)} · ` : p.t ? `last match ${day(p.t)} · ` : ''}id ${esc(String(id).slice(0, 8))}…</p>
   ${tiles(tile('Matches', num(p.n)), tile('Win rate', fpct(pct(p.w, p.d))), tile('As Hunter', fpct(pct(p.h.w, p.h.d)), `${p.h.n} matches`), tile('As Monster', fpct(pct(p.m.w, p.m.d)), `${p.m.n} matches`),
     tile('Account level', num(p.level)), tile('Time played', hours(p.secs)),
     PUBLIC ? '' : tile('Play sessions', sess ? num(sess) : '–', sess ? `${dec(p.n / sess)} matches each` : 'not recorded'), PUBLIC ? '' : tile('Chat', dec(p.chat / p.n), 'messages per match'))}
-  <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(ladderOf(p).h, 'Hunter ladder')}${lad(ladderOf(p).m, 'Monster ladder')}</div></section>
+  <div class="cols"><section><h2>Ranked</h2><div class="panel">${lad(ladderOf(p).m, 'Monster ladder')}${lad(ladderOf(p).h, 'Hunter ladder')}</div></section>
     ${PUBLIC ? '' : `<section><h2>Queueing and conduct</h2><div class="panel">${kv('Average queue', clock(avg(a?.q.dur, a?.q.ok)))}${kv('Left the queue', num(a ? a.q.n - a.q.ok : null))}
       ${kv('Queue dodges', num(a?.q.dodges))}${kv('Joined late', num(p.late))}${kv('Disconnects', num(p.leaves))}</div></section>`}</div>
-  <h2>Characters</h2>${table('pc-' + id, [Tx('Character', c => charInfo(c.id).name, c => chip(c.id)), Tx('Class', c => charInfo(c.id).class, c => classCell(charInfo(c.id).class)),
-    N('Matches', c => c.n), N('Win rate', c => pct(c.w, c.d), c => bar(pct(c.w, c.d))), N('Level', c => c.level), Tx('Usual skin', skinOf),
-    N('Damage dealt', c => avg(c.dmg, c.dn ?? c.n)), N('Damage taken', c => avg(c.taken, c.dn ?? c.n))], Object.values(pchars), 2, 0, false, c => charHref(c.id))}${SUM?.split ? wait : ''}
+  <h2>Characters</h2>${[['m', 'Monsters'], ['h', 'Hunters']].map(([sd, title]) => {       // Monsters (the shorter list) then Hunters (Roger, 2026-11-09)
+    const list = Object.values(pchars).filter(c => (charInfo(c.id).class === 'Monster') === (sd === 'm'));
+    return !list.length ? '' : `<h3 style="margin-top:1rem">${title}</h3>` + table(`pc-${sd}-${id}`, [Tx('Character', c => charInfo(c.id).name, c => chip(c.id)),
+      ...(sd === 'h' ? [Tx('Class', c => charInfo(c.id).class, c => classCell(charInfo(c.id).class))] : []),
+      N('Matches', c => c.n), W('Win rate', c => pct(c.w, c.d), c => bar(pct(c.w, c.d)), c => c.n), N('Level', c => c.level), Tx('Usual skin', skinOf),
+      N('Damage dealt', c => avg(c.dmg, c.dn ?? c.n)), N('Damage taken', c => avg(c.taken, c.dn ?? c.n))], list, sd === 'h' ? 2 : 1, 0, false, c => charHref(c.id), OWN_MIN); }).join('')}${SUM?.split ? wait : ''}
+  ${!pkChars.length ? '' : `<h2>Perks</h2><p class="lead">The perks ${esc(pname(id))} brings, character by character.</p>
+  <div class="filters"><label>Character ${select('players.pchar', pkChars.map(([cid, n]) => [cid, `${charInfo(cid).name} (${plural(n, 'match', 'matches')})`]), pkChar)}</label></div>
+  ${table('ppk-' + id + '-' + pkChar, [Tx('Perk', t => perkInfo(t.k).name, t => perkCell(t.k)), N('Times picked', t => t.n), P('Pick rate', t => pct(t.n, pkRows.length)),
+    W('Win rate', t => pct(t.w, t.d), null, t => t.n)], pkPerks, 1, 10, false, null, OWN_MIN)}
+  ${pkSets.length ? `<h3 style="margin-top:1.2rem">Loadouts</h3>${table('pps-' + id + '-' + pkChar, [Tx('Perks', t => t.k, t => perkIcons(t.k.split('+')) + ' <span class="dim">' + t.k.split('+').map(k => esc(perkInfo(k).name)).join(', ') + '</span>'),
+    N('Matches', t => t.n), P('Share', t => pct(t.n, pkRows.length)), W('Win rate', t => pct(t.w, t.d), null, t => t.n)], pkSets, 1, 10, false, null, OWN_MIN)}` : ''}
+  <p class="note">From ${plural(pkRows.length, 'match', 'matches')} on ${esc(charInfo(pkChar).name)} with perks recorded. Pick rate is the share of those matches where the perk was brought.</p>`}
   ${PUBLIC ? '' : `<h2>Progression</h2>${waitFor(dev)}<div class="cols"><section><div class="panel"><h3>Account XP gained, last ${gains.length} times</h3>${chart(gains.map(g => g.gain), gains.map(g => g.up ? '▲' : ''))}
       <p class="note">▲ marks a level-up.</p></div></section>
     <section>${table('prw-' + id, [N('When', r => r.t, r => day(r.t)), Tx('Why', r => pretty(r.why)), Tx('Reward', r => r.name), N('Amount', r => r.amount)], y.rewards, 0, 8)}</section></div>
@@ -1027,7 +1110,7 @@ function matchmaking() {
   ${tiles(tile('Matches with a leaver', fpct(pct(S.leaverMatches, S.total)), `${num(S.leaverMatches)} of ${num(S.total)}`), tile('Disconnects', num(sumv(S.leavers))))}
   ${table('mmleav', [Tx('Class', r => r.k, r => classTag(r.k)), N('Disconnects', r => r.n), P('Share of matches', r => pct(r.n, S.total))], ROLES.map(k => ({ k, n: S.leavers[k] || 0 })), 1)}
   <div class="cols"><section><h2>Parties and the health buff</h2>${table('mmparty', [Tx('Parties in the lobby', x => x.k.split('|')[0]), Tx('Hunter health buff', x => x.k.split('|')[1] || 'None'), N('Matches', x => x.n),
-      N('Hunters win', x => pct(x.w, x.d), x => `<span class="c-Medic">${bar(pct(x.w, x.d))}</span>`)], Object.entries(S.party).map(([k, v]) => ({ k, ...v })), 2)}</section>
+      W('Hunters win', x => pct(x.w, x.d), x => `<span class="c-Medic">${bar(pct(x.w, x.d))}</span>`, x => x.n)], Object.entries(S.party).map(([k, v]) => ({ k, ...v })), 2, 0, false, null, FEW)}</section>
     <section><h2>How even matches are</h2><div class="panel c-Medic">${chart(gaps.map(g => pct(S.even[g].w, S.even[g].d)), gaps.map(g => (g > 0 ? '+' : '') + g), fpct)}
       <p class="note">Hunter win rate by skill gap (Hunters' average matchmaking skill minus the Monster's). A flat line near 50% means even matches.</p></div></section></div>`;
 }
@@ -1167,10 +1250,12 @@ addEventListener('hashchange', () => render());
 app.addEventListener('click', e => {
   const s = e.target.closest('[data-sort]'), b = e.target.closest('button[data-st]'), a = e.target.closest('[data-audio]'), row = e.target.closest('tr[data-href]');
   if (row && !e.target.closest('a, button, select, input')) location.hash = row.dataset.href;      // the whole row opens the page, not just the name
-  if (s) { const st = sortState[s.dataset.sort], i = +s.dataset.i; st.dir = st.i === i ? -st.dir : -1; st.i = i; render(true); }
+  if (s) { const st = sortState[s.dataset.sort], i = +s.dataset.i; st.dir = st.i === i ? -st.dir : -1; st.i = i; st.pg = 0; render(true); }
+  const pb = e.target.closest('button[data-pg]'); if (pb && !pb.disabled) { sortState[pb.dataset.pg].pg = +pb.dataset.p; render(true); }
   if (b) setState(b.dataset.st, b.dataset.v);
   if (a) { audio.src = a.dataset.audio; audio.play().catch(() => { a.textContent = 'No file'; }); }
 });
+app.addEventListener('toggle', e => { const k = e.target.dataset?.fold; if (k) e.target.open ? FOLDS.add(k) : FOLDS.delete(k); }, true);
 app.addEventListener('change', e => { if (e.target.matches('select[data-st]')) setState(e.target.dataset.st, e.target.value); });
 app.addEventListener('input', e => {
   if (!e.target.matches('input[data-st]')) return;
