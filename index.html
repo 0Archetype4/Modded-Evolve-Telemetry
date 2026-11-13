@@ -228,8 +228,9 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
 <script src="data/catalog.js?v=24a9e195c36e"></script>
 
 <script src="summary.js?v=d02177b33821"></script>
+<script src="count.js?v=ec7b5469b894"></script>
 
-<link rel="preload" as="script" href="app.js?v=c30169c06630">
+<link rel="preload" as="script" href="app.js?v=88d1f1870b5d">
 <script>
 (function () {
   var site = "https://assets.modded-evolve.com/telemetry/site";
@@ -239,7 +240,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: .8
   // run's stamp, so the browser keeps it until the NAS has counted again (hourly) instead of fetching it anew.
   load(site + '/build.js?t=' + Math.floor(Date.now() / 300000), function () {
     var b = window.TELEMETRY_BUILD ? encodeURIComponent(window.TELEMETRY_BUILD.built) : Math.floor(Date.now() / 3600000);
-    load(site + '/core.js?b=' + b, function () { load("app.js?v=c30169c06630", function () {}); });
+    load(site + '/core.js?b=' + b, function () { load("app.js?v=88d1f1870b5d", function () {}); });
   });
 })();
 </script>
